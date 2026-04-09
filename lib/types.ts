@@ -9,6 +9,9 @@ export interface ForexSignalRequest {
     signal: number;
     histogram: number;
   };
+  sl?: number;
+  tp?: number;
+  atr?: number;
 }
 
 export type SignalType = 'BUY' | 'SELL' | 'NEUTRAL';
@@ -23,6 +26,10 @@ export interface ForexSignal {
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   timestamp: Date;
   telegramSent: boolean;
+  sl?: number;
+  tp?: number;
+  atr?: number;
+  volatility?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 export interface RiskMetrics {

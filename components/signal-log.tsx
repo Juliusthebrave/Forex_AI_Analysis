@@ -86,6 +86,17 @@ export function SignalLog({ signals }: SignalLogProps) {
     }
   };
 
+  const getVolatilityInfo = (volatility?: ForexSignal['volatility']) => {
+    switch (volatility) {
+      case 'LOW':
+        return { label: 'Low Volatility', className: 'bg-blue-500/10 text-blue-500' };
+      case 'HIGH':
+        return { label: 'High Volatility', className: 'bg-orange-500/10 text-orange-500' };
+      default:
+        return { label: 'Medium Volatility', className: 'bg-purple-500/10 text-purple-500' };
+    }
+  };
+
   const getConfidenceBarColor = (confidence: number) => {
     if (confidence >= 70) return 'bg-emerald-500';
     if (confidence >= 50) return 'bg-amber-500';
@@ -130,19 +141,41 @@ export function SignalLog({ signals }: SignalLogProps) {
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              Entry @ {signal.price.toFixed(5)}
+              Entry @ {signal.price.toFixed(signal.symbol.includes('JPY') ? 3 : 5)}
             </p>
+            {(signal.sl || signal.tp) && (
+              <div className="flex items-center gap-3 mt-1">
+                {signal.sl && (
+                  <span className="text-xs text-red-400">
+                    SL: {signal.sl.toFixed(signal.symbol.includes('JPY') ? 3 : 5)}
+                  </span>
+                )}
+                {signal.tp && (
+                  <span className="text-xs text-emerald-400">
+                    TP: {signal.tp.toFixed(signal.symbol.includes('JPY') ? 3 : 5)}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
         
         <div className="flex flex-col items-end gap-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
             <span className={cn(
               'px-2 py-0.5 text-xs font-medium rounded',
               getRiskBadgeClass(signal.riskLevel)
             )}>
-              {signal.riskLevel}
+              {signal.riskLevel} Risk
             </span>
+            {signal.volatility && (
+              <span className={cn(
+                'px-2 py-0.5 text-xs font-medium rounded',
+                getVolatilityInfo(signal.volatility).className
+              )}>
+                {getVolatilityInfo(signal.volatility).label}
+              </span>
+            )}
             {signal.telegramSent && (
               <Send className="h-3.5 w-3.5 text-blue-500" />
             )}
@@ -150,6 +183,11 @@ export function SignalLog({ signals }: SignalLogProps) {
           <span className="text-xs text-muted-foreground">
             {formatDate(signal.timestamp)} {formatTime(signal.timestamp)}
           </span>
+          {signal.atr && (
+            <span className="text-xs text-muted-foreground">
+              ATR: {signal.atr.toFixed(signal.symbol.includes('JPY') ? 3 : 5)}
+            </span>
+          )}
         </div>
       </div>
       

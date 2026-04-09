@@ -54,7 +54,7 @@ interface AnalysisResponse {
 export async function POST(req: Request) {
   try {
     const body: ForexSignalRequest & { accountBalance?: number } = await req.json();
-    const { symbol, price, ema8, ema20, ema50, macd, accountBalance = 27 } = body;
+    const { symbol, price, ema8, ema20, ema50, macd, sl, tp, atr, accountBalance = 27 } = body;
 
     // Validate required fields
     if (!symbol || typeof price !== 'number') {
@@ -67,6 +67,18 @@ export async function POST(req: Request) {
     const maxRiskPerTrade = accountBalance * 0.02;
     const recommendedLot = (accountBalance * 0.01) / 100;
     const accountCategory = accountBalance < 50 ? 'Micro' : accountBalance < 200 ? 'Mini' : accountBalance < 1000 ? 'Small' : 'Standard';
+    
+    // Determine volatility based on ATR relative to price
+    // ATR as percentage of price: < 0.5% = LOW, 0.5-1.5% = MEDIUM, > 1.5% = HIGH
+    let volatility: 'LOW' | 'MEDIUM' | 'HIGH' = 'MEDIUM';
+    if (atr && price) {
+      const atrPercent = (atr / price) * 100;
+      if (atrPercent < 0.5) {
+        volatility = 'LOW';
+      } else if (atrPercent > 1.5) {
+        volatility = 'HIGH';
+      }
+    }
 
     const userPrompt = `Analyze this Forex data and provide a trading signal:
 
@@ -184,6 +196,10 @@ Provide your analysis considering both technical indicators and current April 20
       riskLevel: aiResponse.riskLevel,
       timestamp: new Date(),
       telegramSent: false,
+      sl,
+      tp,
+      atr,
+      volatility,
     };
 
     // Send to Telegram
