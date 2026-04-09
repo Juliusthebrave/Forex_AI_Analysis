@@ -91,23 +91,41 @@ Provide your analysis considering both technical indicators and current April 20
 IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
 {"signal": "BUY" | "SELL" | "NEUTRAL", "confidence": <number 0-100>, "riskLevel": "LOW" | "MEDIUM" | "HIGH", "analysis": "<your analysis text>"}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-06-17' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
     
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${SYSTEM_PROMPT}\n\n${userPrompt}` }],
+    let result;
+    try {
+      result = await model.generateContent({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${SYSTEM_PROMPT}\n\n${userPrompt}` }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1024,
         },
-      ],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1024,
-      },
-    });
+      });
+    } catch (geminiError: unknown) {
+      const errorMessage = geminiError instanceof Error ? geminiError.message : 'Unknown Gemini API error';
+      console.error('[v0] Gemini API error:', errorMessage);
+      return Response.json(
+        { error: `Gemini API error: ${errorMessage}` },
+        { status: 502 }
+      );
+    }
 
     const response = result.response;
     const text = response.text();
+    
+    if (!text || text.trim().length === 0) {
+      console.error('[v0] Gemini returned empty response');
+      return Response.json(
+        { error: 'Gemini returned empty response' },
+        { status: 502 }
+      );
+    }
     
     // Parse the JSON response from Gemini
     let aiResponse: AnalysisResponse;
@@ -118,15 +136,16 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdo
     } catch {
       console.error('[v0] Failed to parse Gemini response:', text);
       return Response.json(
-        { error: 'Failed to parse AI response' },
+        { error: 'Failed to parse AI response', rawResponse: text.substring(0, 200) },
         { status: 500 }
       );
     }
 
     // Validate the response structure
     if (!aiResponse.signal || !aiResponse.analysis || typeof aiResponse.confidence !== 'number') {
+      console.error('[v0] Invalid AI response structure:', aiResponse);
       return Response.json(
-        { error: 'Invalid AI response structure' },
+        { error: 'Invalid AI response structure', received: aiResponse },
         { status: 500 }
       );
     }
