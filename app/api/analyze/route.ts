@@ -1,8 +1,9 @@
-import { generateText, Output } from 'ai';
-import { z } from 'zod';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { addSignal } from '@/lib/signal-store';
 import { sendTelegramSignal } from '@/lib/telegram';
 import type { ForexSignalRequest, ForexSignal, SignalType } from '@/lib/types';
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY || '');
 
 const SYSTEM_PROMPT = `You are an expert Forex market analyst with deep knowledge of technical analysis and current geopolitical events. Your analysis takes place in April 2026.
 
@@ -37,12 +38,12 @@ Always tailor lot size recommendations and risk levels to the specific account b
 
 Provide a concise but thorough analysis combining technical indicators with geopolitical context. Be specific about how current events might affect the currency pair.`;
 
-const analysisSchema = z.object({
-  signal: z.enum(['BUY', 'SELL', 'NEUTRAL']),
-  confidence: z.number().min(0).max(100),
-  riskLevel: z.enum(['LOW', 'MEDIUM', 'HIGH']),
-  analysis: z.string(),
-});
+interface AnalysisResponse {
+  signal: 'BUY' | 'SELL' | 'NEUTRAL';
+  confidence: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  analysis: string;
+}
 
 export async function POST(req: Request) {
   try {
@@ -85,20 +86,47 @@ Technical Observations:
 - EMA Alignment: ${ema8 > ema20 && ema20 > ema50 ? 'Bullish (8>20>50)' : ema8 < ema20 && ema20 < ema50 ? 'Bearish (8<20<50)' : 'Mixed'}
 - MACD Momentum: ${(macd?.histogram ?? 0) > 0 ? 'Bullish' : 'Bearish'}
 
-Provide your analysis considering both technical indicators and current April 2026 geopolitical factors.`;
+Provide your analysis considering both technical indicators and current April 2026 geopolitical factors.
 
-    const result = await generateText({
-      model: 'openai/gpt-4o',
-      system: SYSTEM_PROMPT,
-      prompt: userPrompt,
-      output: Output.object({ schema: analysisSchema }),
+IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
+{"signal": "BUY" | "SELL" | "NEUTRAL", "confidence": <number 0-100>, "riskLevel": "LOW" | "MEDIUM" | "HIGH", "analysis": "<your analysis text>"}`;
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `${SYSTEM_PROMPT}\n\n${userPrompt}` }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1024,
+      },
     });
 
-    const aiResponse = result.object;
-
-    if (!aiResponse) {
+    const response = result.response;
+    const text = response.text();
+    
+    // Parse the JSON response from Gemini
+    let aiResponse: AnalysisResponse;
+    try {
+      // Clean up potential markdown code blocks
+      const cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      aiResponse = JSON.parse(cleanedText);
+    } catch {
+      console.error('[v0] Failed to parse Gemini response:', text);
       return Response.json(
-        { error: 'Failed to generate analysis' },
+        { error: 'Failed to parse AI response' },
+        { status: 500 }
+      );
+    }
+
+    // Validate the response structure
+    if (!aiResponse.signal || !aiResponse.analysis || typeof aiResponse.confidence !== 'number') {
+      return Response.json(
+        { error: 'Invalid AI response structure' },
         { status: 500 }
       );
     }
