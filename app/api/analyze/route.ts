@@ -91,11 +91,11 @@ Provide your analysis considering both technical indicators and current April 20
 IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
 {"signal": "BUY" | "SELL" | "NEUTRAL", "confidence": <number 0-100>, "riskLevel": "LOW" | "MEDIUM" | "HIGH", "analysis": "<your analysis text>"}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' });
     
-    let result;
+    let text: string;
     try {
-      result = await model.generateContent({
+      const result = await model.generateContent({
         contents: [
           {
             role: 'user',
@@ -107,22 +107,31 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdo
           maxOutputTokens: 1024,
         },
       });
+      
+      const response = result.response;
+      text = response.text();
     } catch (geminiError: unknown) {
       const errorMessage = geminiError instanceof Error ? geminiError.message : 'Unknown Gemini API error';
       console.error('[v0] Gemini API error:', errorMessage);
       return Response.json(
-        { error: `Gemini API error: ${errorMessage}` },
+        { 
+          success: false,
+          error: 'Gemini API error',
+          details: errorMessage,
+          suggestion: 'Check your GOOGLE_GENERATIVE_AI_API_KEY and model availability'
+        },
         { status: 502 }
       );
     }
-
-    const response = result.response;
-    const text = response.text();
     
     if (!text || text.trim().length === 0) {
       console.error('[v0] Gemini returned empty response');
       return Response.json(
-        { error: 'Gemini returned empty response' },
+        { 
+          success: false,
+          error: 'Empty response from AI',
+          details: 'Gemini returned an empty response'
+        },
         { status: 502 }
       );
     }
@@ -130,24 +139,43 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdo
     // Parse the JSON response from Gemini
     let aiResponse: AnalysisResponse;
     try {
-      // Clean up potential markdown code blocks
-      const cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      // Clean up potential markdown code blocks and extract JSON
+      let cleanedText = text.trim();
+      // Remove markdown code blocks if present
+      if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/```(?:json)?\n?/g, '').trim();
+      }
+      // Try to find JSON object in the response
+      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanedText = jsonMatch[0];
+      }
       aiResponse = JSON.parse(cleanedText);
-    } catch {
+    } catch (parseError) {
       console.error('[v0] Failed to parse Gemini response:', text);
       return Response.json(
-        { error: 'Failed to parse AI response', rawResponse: text.substring(0, 200) },
+        { 
+          success: false,
+          error: 'Failed to parse AI response',
+          rawResponse: text.substring(0, 300),
+          parseError: parseError instanceof Error ? parseError.message : 'Unknown parse error'
+        },
         { status: 500 }
       );
     }
 
-    // Validate the response structure
-    if (!aiResponse.signal || !aiResponse.analysis || typeof aiResponse.confidence !== 'number') {
-      console.error('[v0] Invalid AI response structure:', aiResponse);
-      return Response.json(
-        { error: 'Invalid AI response structure', received: aiResponse },
-        { status: 500 }
-      );
+    // Validate the response structure with defaults for missing optional fields
+    if (!aiResponse.signal || !['BUY', 'SELL', 'NEUTRAL'].includes(aiResponse.signal)) {
+      aiResponse.signal = 'NEUTRAL';
+    }
+    if (typeof aiResponse.confidence !== 'number' || aiResponse.confidence < 0 || aiResponse.confidence > 100) {
+      aiResponse.confidence = 50;
+    }
+    if (!aiResponse.riskLevel || !['LOW', 'MEDIUM', 'HIGH'].includes(aiResponse.riskLevel)) {
+      aiResponse.riskLevel = 'MEDIUM';
+    }
+    if (!aiResponse.analysis || typeof aiResponse.analysis !== 'string') {
+      aiResponse.analysis = 'Analysis unavailable';
     }
 
     // Create signal record
@@ -183,9 +211,14 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdo
       signal: forexSignal,
     });
   } catch (error) {
-    console.error('[v0] Analysis error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[v0] Analysis error:', errorMessage);
     return Response.json(
-      { error: 'Failed to analyze forex data' },
+      { 
+        success: false,
+        error: 'Failed to analyze forex data',
+        details: errorMessage
+      },
       { status: 500 }
     );
   }
