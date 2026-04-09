@@ -91,7 +91,7 @@ Provide your analysis considering both technical indicators and current April 20
 IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
 {"signal": "BUY" | "SELL" | "NEUTRAL", "confidence": <number 0-100>, "riskLevel": "LOW" | "MEDIUM" | "HIGH", "analysis": "<your analysis text>"}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     
     const result = await model.generateContent({
       contents: [
