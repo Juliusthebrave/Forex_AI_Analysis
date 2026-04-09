@@ -1,9 +1,12 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateText } from 'ai';
+import { createGroq } from '@ai-sdk/groq';
 import { addSignal } from '@/lib/signal-store';
 import { sendTelegramSignal } from '@/lib/telegram';
 import type { ForexSignalRequest, ForexSignal, SignalType } from '@/lib/types';
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY || '');
+const groq = createGroq({
+  apiKey: process.env.GROQ_API_KEY,
+});
 
 const SYSTEM_PROMPT = `You are an expert Forex market analyst with deep knowledge of technical analysis and current geopolitical events. Your analysis takes place in April 2026.
 
@@ -36,7 +39,10 @@ You will receive the trader's account balance. Adjust your risk assessment accor
 
 Always tailor lot size recommendations and risk levels to the specific account balance provided.
 
-Provide a concise but thorough analysis combining technical indicators with geopolitical context. Be specific about how current events might affect the currency pair.`;
+Provide a concise but thorough analysis combining technical indicators with geopolitical context. Be specific about how current events might affect the currency pair.
+
+IMPORTANT: You MUST respond ONLY with a valid JSON object in this exact format (no markdown, no extra text, no code blocks):
+{"signal": "BUY" | "SELL" | "NEUTRAL", "confidence": <number 0-100>, "riskLevel": "LOW" | "MEDIUM" | "HIGH", "analysis": "<your analysis text>"}`;
 
 interface AnalysisResponse {
   signal: 'BUY' | 'SELL' | 'NEUTRAL';
@@ -86,57 +92,46 @@ Technical Observations:
 - EMA Alignment: ${ema8 > ema20 && ema20 > ema50 ? 'Bullish (8>20>50)' : ema8 < ema20 && ema20 < ema50 ? 'Bearish (8<20<50)' : 'Mixed'}
 - MACD Momentum: ${(macd?.histogram ?? 0) > 0 ? 'Bullish' : 'Bearish'}
 
-Provide your analysis considering both technical indicators and current April 2026 geopolitical factors.
+Provide your analysis considering both technical indicators and current April 2026 geopolitical factors.`;
 
-IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
-{"signal": "BUY" | "SELL" | "NEUTRAL", "confidence": <number 0-100>, "riskLevel": "LOW" | "MEDIUM" | "HIGH", "analysis": "<your analysis text>"}`;
-
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' });
-    
     let text: string;
     try {
-      const result = await model.generateContent({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: `${SYSTEM_PROMPT}\n\n${userPrompt}` }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1024,
-        },
+      const result = await generateText({
+        model: groq('llama-4-scout-17b-instruct'),
+        system: SYSTEM_PROMPT,
+        prompt: userPrompt,
+        temperature: 0.7,
+        maxTokens: 1024,
       });
       
-      const response = result.response;
-      text = response.text();
-    } catch (geminiError: unknown) {
-      const errorMessage = geminiError instanceof Error ? geminiError.message : 'Unknown Gemini API error';
-      console.error('[v0] Gemini API error:', errorMessage);
+      text = result.text;
+    } catch (groqError: unknown) {
+      const errorMessage = groqError instanceof Error ? groqError.message : 'Unknown Groq API error';
+      console.error('[v0] Groq API error:', errorMessage);
       return Response.json(
         { 
           success: false,
-          error: 'Gemini API error',
+          error: 'Groq API error',
           details: errorMessage,
-          suggestion: 'Check your GOOGLE_GENERATIVE_AI_API_KEY and model availability'
+          suggestion: 'Check your GROQ_API_KEY and model availability'
         },
         { status: 502 }
       );
     }
     
     if (!text || text.trim().length === 0) {
-      console.error('[v0] Gemini returned empty response');
+      console.error('[v0] Groq returned empty response');
       return Response.json(
         { 
           success: false,
           error: 'Empty response from AI',
-          details: 'Gemini returned an empty response'
+          details: 'Groq returned an empty response'
         },
         { status: 502 }
       );
     }
     
-    // Parse the JSON response from Gemini
+    // Parse the JSON response from Groq
     let aiResponse: AnalysisResponse;
     try {
       // Clean up potential markdown code blocks and extract JSON
@@ -152,7 +147,7 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format (no markdo
       }
       aiResponse = JSON.parse(cleanedText);
     } catch (parseError) {
-      console.error('[v0] Failed to parse Gemini response:', text);
+      console.error('[v0] Failed to parse Groq response:', text);
       return Response.json(
         { 
           success: false,
