@@ -97,7 +97,7 @@ Provide your analysis considering both technical indicators and current April 20
     let text: string;
     try {
       const result = await generateText({
-        model: groq('llama-4-scout-17b-instruct'),
+        model: groq('meta-llama/llama-4-scout-17b-16e-instruct'),
         system: SYSTEM_PROMPT,
         prompt: userPrompt,
         temperature: 0.7,
