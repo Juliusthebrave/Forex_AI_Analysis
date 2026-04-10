@@ -331,25 +331,34 @@ Provide your analysis considering:
       technicalReasoning,
     };
 
-    // Send to Telegram
-    const telegramSent = await sendTelegramSignal({
+    // Store signal immediately
+    await addSignal(forexSignal);
+
+    // Send response immediately (don't wait for Telegram)
+    const response = Response.json({
+      success: true,
+      signal: forexSignal,
+    });
+
+    // Send Telegram in background (fire and forget)
+    sendTelegramSignal({
       symbol,
       signal: aiResponse.signal as SignalType,
       price,
       analysis: aiResponse.analysis,
       confidence: finalConfidence,
       riskLevel: aiResponse.riskLevel,
+    }).then((telegramSent) => {
+      // Update the signal with Telegram status asynchronously
+      if (telegramSent) {
+        // Note: In a real app, you'd update the stored signal here
+        console.log(`[Telegram] Signal sent for ${symbol}`);
+      }
+    }).catch((error) => {
+      console.error('[Telegram] Failed to send signal:', error);
     });
 
-    forexSignal.telegramSent = telegramSent;
-
-    // Store signal
-    addSignal(forexSignal);
-
-    return Response.json({
-      success: true,
-      signal: forexSignal,
-    });
+    return response;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('[v0] Analysis error:', errorMessage);

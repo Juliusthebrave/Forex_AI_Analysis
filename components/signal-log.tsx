@@ -13,20 +13,20 @@ import { TrendingUp, TrendingDown, Minus, Send, Clock, Plus, X } from 'lucide-re
 const DEFAULT_SYMBOLS = ['XAUUSD', 'BTCUSD', 'EURUSD'];
 
 interface SignalLogProps {
-  signals: ForexSignal[];
+  signals?: ForexSignal[];
 }
 
-export function SignalLog({ signals }: SignalLogProps) {
+export function SignalLog({ signals = [] }: SignalLogProps) {
   const [trackedSymbols, setTrackedSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
   const [activeTab, setActiveTab] = useState(DEFAULT_SYMBOLS[0]);
   const [newSymbol, setNewSymbol] = useState('');
   const [popoverOpen, setPopoverOpen] = useState(false);
 
-  // Group signals by symbol
+  // Group signals by symbol with safe access
   const signalsBySymbol = useMemo(() => {
     const grouped: Record<string, ForexSignal[]> = {};
     trackedSymbols.forEach(symbol => {
-      grouped[symbol] = signals.filter(s => s.symbol === symbol);
+      grouped[symbol] = (signals || []).filter(s => s.symbol === symbol);
     });
     return grouped;
   }, [signals, trackedSymbols]);

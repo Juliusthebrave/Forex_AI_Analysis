@@ -10,7 +10,7 @@ import { Activity, TrendingUp, TrendingDown, Percent } from 'lucide-react';
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function Dashboard() {
-  const { data } = useSWR<{ signals: ForexSignal[] }>('/api/signals', fetcher, {
+  const { data, isLoading } = useSWR<{ signals: ForexSignal[] }>('/api/signals', fetcher, {
     refreshInterval: 5000,
   });
 
@@ -18,12 +18,24 @@ export function Dashboard() {
 
   const signals = data?.signals || [];
 
-  // Calculate stats
-  const todaySignals = signals.filter(s => {
+  // Show loading state if no data yet
+  if (isLoading && signals.length === 0) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          <p className="text-muted-foreground">Loading signals...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Calculate stats with safe access
+  const todaySignals = signals?.filter(s => {
     const signalDate = new Date(s.timestamp);
     const today = new Date();
     return signalDate.toDateString() === today.toDateString();
-  });
+  }) || [];
 
   const buySignals = todaySignals.filter(s => s.signal === 'BUY').length;
   const sellSignals = todaySignals.filter(s => s.signal === 'SELL').length;
@@ -31,7 +43,7 @@ export function Dashboard() {
     ? Math.round(todaySignals.reduce((sum, s) => sum + s.confidence, 0) / todaySignals.length)
     : 0;
 
-  // Market phase breakdown
+  // Market phase breakdown with safe access
   const marketPhases = {
     MARKUP: todaySignals.filter(s => s.marketPhase === 'MARKUP').length,
     MARKDOWN: todaySignals.filter(s => s.marketPhase === 'MARKDOWN').length,
@@ -39,7 +51,7 @@ export function Dashboard() {
     DISTRIBUTION: todaySignals.filter(s => s.marketPhase === 'DISTRIBUTION').length,
   };
 
-  // Pattern detection stats
+  // Pattern detection stats with safe access
   const bullishPatterns = todaySignals.filter(s =>
     s.patternDetected === 'HAMMER' || s.patternDetected === 'BULLISH_ENGULFING'
   ).length;
