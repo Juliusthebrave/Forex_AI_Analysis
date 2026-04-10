@@ -1,25 +1,49 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import useSWR from 'swr';
 import { SignalLog } from './signal-log';
 import { BalanceCard } from './balance-card';
 import type { ForexSignal } from '@/lib/types';
 import { Activity, TrendingUp, TrendingDown, Percent } from 'lucide-react';
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const fetcher = (url: string) => {
+  console.log('[Dashboard] Fetching signals from:', url);
+  return fetch(url)
+    .then((res) => {
+      console.log('[Dashboard] API response status:', res.status);
+      return res.json();
+    })
+    .catch((error) => {
+      console.error('[Dashboard] Fetch error:', error);
+      throw error;
+    });
+};
 
 export function Dashboard() {
+  // Hydration fix: ensure client-side only rendering
+  const [isMounted, setIsMounted] = useState(false);
+  
+  useEffect(() => {
+    console.log('[Dashboard] Component mounted on client');
+    setIsMounted(true);
+  }, []);
+
   const { data, isLoading } = useSWR<{ signals: ForexSignal[] }>('/api/signals', fetcher, {
     refreshInterval: 5000,
   });
 
   const [accountBalance, setAccountBalance] = useState(27);
 
+  // Log signal data for debugging
+  console.log('[Dashboard] Signals Data:', data?.signals || []);
+  console.log('[Dashboard] Is Loading:', isLoading);
+  console.log('[Dashboard] Is Mounted:', isMounted);
+
   const signals = data?.signals || [];
 
   // Show loading state if no data yet
-  if (isLoading && signals.length === 0) {
+  if (!isMounted || (isLoading && signals.length === 0)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -36,6 +60,8 @@ export function Dashboard() {
     const today = new Date();
     return signalDate.toDateString() === today.toDateString();
   }) || [];
+
+  console.log('[Dashboard] Today Signals Count:', todaySignals.length);
 
   const buySignals = todaySignals.filter(s => s.signal === 'BUY').length;
   const sellSignals = todaySignals.filter(s => s.signal === 'SELL').length;

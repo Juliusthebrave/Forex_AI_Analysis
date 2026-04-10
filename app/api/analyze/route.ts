@@ -68,6 +68,7 @@ interface AnalysisResponse {
 
 export async function POST(req: Request) {
   try {
+    console.log('[API] POST /api/analyze request received');
     const body: ForexSignalRequest & { accountBalance?: number } = await req.json();
     const {
       symbol,
@@ -84,8 +85,11 @@ export async function POST(req: Request) {
       accountBalance = 27,
     } = body;
 
+    console.log(`[API] Analyzing ${symbol} at price ${price}`);
+
     // Validate required fields
     if (!symbol || typeof price !== 'number') {
+      console.error('[API] Missing required fields: symbol or price');
       return Response.json(
         { error: 'Missing required fields: symbol and price are required' },
         { status: 400 }
@@ -332,9 +336,11 @@ Provide your analysis considering:
     };
 
     // Store signal immediately
+    console.log(`[API] Storing signal: ${forexSignal.symbol} ${forexSignal.signal} (Confidence: ${forexSignal.confidence}%)`);
     await addSignal(forexSignal);
 
     // Send response immediately (don't wait for Telegram)
+    console.log(`[API] Sending response for ${symbol}`);
     const response = Response.json({
       success: true,
       signal: forexSignal,
