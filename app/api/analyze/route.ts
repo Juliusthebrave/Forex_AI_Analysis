@@ -275,6 +275,26 @@ Provide your analysis considering:
     // ========== APPLY VOLATILITY CONFIDENCE REDUCTION ==========
     let finalConfidence = Math.max(1, aiResponse.confidence + confidenceAdjustment);
 
+    // ========== DETERMINE RISK LEVEL BASED ON CONFIDENCE & VOLATILITY ==========
+    let calculatedRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'MEDIUM';
+
+    if (finalConfidence < 20) {
+      // Very low confidence = High risk due to uncertainty
+      calculatedRiskLevel = 'HIGH';
+    } else if (finalConfidence > 70 && volatility === 'LOW' && !volatilityResult.isHigh) {
+      // High confidence + Low volatility = Low risk
+      calculatedRiskLevel = 'LOW';
+    } else if (finalConfidence > 70) {
+      // High confidence but not low volatility = Medium risk
+      calculatedRiskLevel = 'MEDIUM';
+    } else {
+      // Medium confidence = Medium risk
+      calculatedRiskLevel = 'MEDIUM';
+    }
+
+    // Override AI's risk level with our calculated one
+    aiResponse.riskLevel = calculatedRiskLevel;
+
     // ========== CALCULATE ADJUSTED STOP LOSS ==========
     let adjustedSl = sl;
     if (volatilityResult.isHigh && sl) {

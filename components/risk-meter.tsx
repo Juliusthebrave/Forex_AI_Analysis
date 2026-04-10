@@ -41,13 +41,12 @@ export function RiskMeter({ accountBalance, selectedMarket, allMarkets }: RiskMe
     return 'High Risk';
   };
 
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case 'LOW': return 'text-emerald-500 bg-emerald-500/10';
-      case 'MEDIUM': return 'text-amber-500 bg-amber-500/10';
-      case 'HIGH': return 'text-red-500 bg-red-500/10';
-      default: return 'text-muted-foreground bg-muted';
+  const getRiskBadgeText = (risk: string, confidence: number) => {
+    if (risk === 'HIGH' && confidence < 20) {
+      return 'HIGH (Uncertainty)';
     }
+    return risk === 'LOW' ? 'Low Risk' : risk === 'MEDIUM' ? 'Medium Risk' : 'High Risk';
+  };
   };
 
   const recommendedLotSize = (accountBalance * 0.01) / 100; // 1% risk with 100 pip stop loss
@@ -136,7 +135,7 @@ export function RiskMeter({ accountBalance, selectedMarket, allMarkets }: RiskMe
                 'px-2 py-1 rounded text-xs font-bold',
                 getLevelColor(selectedRiskLevel)
               )}>
-                {selectedRiskLevel}
+                {getRiskBadgeText(selectedRiskLevel, selectedSignal.confidence)}
               </span>
             </div>
             <div className="flex items-center gap-2 mb-2">

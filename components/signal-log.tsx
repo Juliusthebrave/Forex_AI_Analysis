@@ -75,15 +75,11 @@ export function SignalLog({ signals }: SignalLogProps) {
     }
   };
 
-  const getRiskBadgeClass = (risk: ForexSignal['riskLevel']) => {
-    switch (risk) {
-      case 'LOW':
-        return 'bg-emerald-500/10 text-emerald-500';
-      case 'MEDIUM':
-        return 'bg-amber-500/10 text-amber-500';
-      default:
-        return 'bg-red-500/10 text-red-500';
+  const getRiskBadgeText = (risk: ForexSignal['riskLevel'], confidence: number) => {
+    if (risk === 'HIGH' && confidence < 20) {
+      return 'HIGH (Uncertainty)';
     }
+    return risk === 'LOW' ? 'Low Risk' : risk === 'MEDIUM' ? 'Medium Risk' : 'High Risk';
   };
 
   const getVolatilityInfo = (volatility?: ForexSignal['volatility']) => {
@@ -208,7 +204,7 @@ export function SignalLog({ signals }: SignalLogProps) {
               'px-2 py-0.5 text-xs font-medium rounded',
               getRiskBadgeClass(signal.riskLevel)
             )}>
-              {signal.riskLevel} Risk
+              {getRiskBadgeText(signal.riskLevel, signal.confidence)}
             </span>
             {signal.volatility && (
               <span className={cn(

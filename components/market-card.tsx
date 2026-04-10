@@ -41,6 +41,13 @@ export function MarketCard({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  const getRiskBadgeText = (risk: string, confidence: number) => {
+    if (risk === 'HIGH' && confidence < 20) {
+      return 'HIGH (Uncertainty)';
+    }
+    return risk === 'LOW' ? 'Low Risk' : risk === 'MEDIUM' ? 'Medium Risk' : 'High Risk';
+  };
+
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
     try {
@@ -211,7 +218,7 @@ export function MarketCard({
                   card.signal.riskLevel === 'LOW' ? 'text-emerald-500' :
                   card.signal.riskLevel === 'MEDIUM' ? 'text-amber-500' : 'text-red-500'
                 )}>
-                  {card.signal.riskLevel}
+                  {getRiskBadgeText(card.signal.riskLevel, card.signal.confidence)}
                 </p>
               </div>
             </div>
