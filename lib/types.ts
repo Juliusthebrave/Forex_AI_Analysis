@@ -1,3 +1,10 @@
+export interface OHLC {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 export interface ForexSignalRequest {
   symbol: string;
   price: number;
@@ -12,9 +19,15 @@ export interface ForexSignalRequest {
   sl?: number;
   tp?: number;
   atr?: number;
+  history?: OHLC[]; // Last 4 candles OHLC data
+  averageAtr?: number; // Average ATR for volatility comparison
 }
 
 export type SignalType = 'BUY' | 'SELL' | 'NEUTRAL';
+
+export type PatternType = 'HAMMER' | 'BULLISH_ENGULFING' | 'FALLING_STAR' | 'BEARISH_ENGULFING' | 'DOJI' | 'NONE';
+
+export type MarketPhase = 'ACCUMULATION' | 'MARKUP' | 'DISTRIBUTION' | 'MARKDOWN';
 
 export interface ForexSignal {
   id: string;
@@ -30,6 +43,10 @@ export interface ForexSignal {
   tp?: number;
   atr?: number;
   volatility?: 'LOW' | 'MEDIUM' | 'HIGH';
+  patternDetected?: PatternType;  // New: detected candle pattern
+  marketPhase?: MarketPhase;      // New: current market phase
+  volatilityAlert?: string;       // New: alert message if volatility is abnormal
+  technicalReasoning?: string;    // New: detailed reasoning for SELL signals
 }
 
 export interface RiskMetrics {

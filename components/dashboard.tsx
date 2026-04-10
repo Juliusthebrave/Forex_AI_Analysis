@@ -30,6 +30,29 @@ export function Dashboard() {
   const avgConfidence = todaySignals.length > 0
     ? Math.round(todaySignals.reduce((sum, s) => sum + s.confidence, 0) / todaySignals.length)
     : 0;
+
+  // Market phase breakdown
+  const marketPhases = {
+    MARKUP: todaySignals.filter(s => s.marketPhase === 'MARKUP').length,
+    MARKDOWN: todaySignals.filter(s => s.marketPhase === 'MARKDOWN').length,
+    ACCUMULATION: todaySignals.filter(s => s.marketPhase === 'ACCUMULATION').length,
+    DISTRIBUTION: todaySignals.filter(s => s.marketPhase === 'DISTRIBUTION').length,
+  };
+
+  // Pattern detection stats
+  const bullishPatterns = todaySignals.filter(s =>
+    s.patternDetected === 'HAMMER' || s.patternDetected === 'BULLISH_ENGULFING'
+  ).length;
+  const bearishPatterns = todaySignals.filter(s =>
+    s.patternDetected === 'FALLING_STAR' || s.patternDetected === 'BEARISH_ENGULFING'
+  ).length;
+  const dojiCount = todaySignals.filter(s => s.patternDetected === 'DOJI').length;
+
+  // Volatility alerts
+  const volatilityAlerts = todaySignals.filter(s => s.volatilityAlert).length;
+  const highVolatility = todaySignals.filter(s =>
+    s.volatilityAlert?.includes('VOLATILE: High Risk')
+  ).length;
   
   // Risk per trade (2% of account balance)
   const riskPerTrade = (accountBalance * 0.02).toFixed(2);
@@ -142,6 +165,56 @@ export function Dashboard() {
           </div>
         </div>
 
+        {/* Market Phase & Pattern Analysis Grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="p-3 rounded-xl border border-border bg-card">
+            <p className="text-xs text-muted-foreground mb-1">Markup Phase</p>
+            <p className="text-xl font-bold text-emerald-500">{marketPhases.MARKUP}</p>
+          </div>
+          <div className="p-3 rounded-xl border border-border bg-card">
+            <p className="text-xs text-muted-foreground mb-1">Markdown Phase</p>
+            <p className="text-xl font-bold text-red-500">{marketPhases.MARKDOWN}</p>
+          </div>
+          <div className="p-3 rounded-xl border border-border bg-card">
+            <p className="text-xs text-muted-foreground mb-1">Bullish Patterns</p>
+            <p className="text-xl font-bold text-emerald-500">{bullishPatterns}</p>
+          </div>
+          <div className="p-3 rounded-xl border border-border bg-card">
+            <p className="text-xs text-muted-foreground mb-1">Bearish Patterns</p>
+            <p className="text-xl font-bold text-red-500">{bearishPatterns}</p>
+          </div>
+        </div>
+
+        {/* Volatility & Pattern Details */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          <div className="p-4 rounded-xl border border-border bg-card">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-2 w-2 rounded-full bg-amber-500" />
+              <p className="text-sm font-semibold text-foreground">Volatility Alerts</p>
+            </div>
+            <p className="text-2xl font-bold text-amber-500">{volatilityAlerts}</p>
+            {highVolatility > 0 && (
+              <p className="text-xs text-red-500 mt-1">⚠️ {highVolatility} High Risk</p>
+            )}
+          </div>
+          <div className="p-4 rounded-xl border border-border bg-card">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-2 w-2 rounded-full bg-blue-500" />
+              <p className="text-sm font-semibold text-foreground">Doji Patterns</p>
+            </div>
+            <p className="text-2xl font-bold text-blue-500">{dojiCount}</p>
+            <p className="text-xs text-muted-foreground mt-1">Exhaustion signals</p>
+          </div>
+          <div className="p-4 rounded-xl border border-border bg-card">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-2 w-2 rounded-full bg-purple-500" />
+              <p className="text-sm font-semibold text-foreground">Accumulation</p>
+            </div>
+            <p className="text-2xl font-bold text-purple-500">{marketPhases.ACCUMULATION}</p>
+            <p className="text-xs text-muted-foreground mt-1">Setup forming</p>
+          </div>
+        </div>
+
         {/* Main Grid - Balance Card & Tabbed Signal Log */}
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Left Column - Balance Card */}
@@ -160,12 +233,18 @@ export function Dashboard() {
 
         {/* API Info */}
         <div className="mt-6 p-4 rounded-xl border border-border bg-card">
-          <h3 className="text-sm font-semibold text-foreground mb-2">API Endpoint</h3>
-          <code className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+          <h3 className="text-sm font-semibold text-foreground mb-2">API Endpoint & Dow-Homma Implementation</h3>
+          <code className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded block mb-2">
             POST /api/analyze
           </code>
-          <p className="text-xs text-muted-foreground mt-2">
-            Send JSON with: symbol, price, ema8, ema20, ema50, macd (line, signal, histogram)
+          <p className="text-xs text-muted-foreground mb-2">
+            <strong>Required fields:</strong> symbol, price, ema8, ema20, ema50, macd (line, signal, histogram)
+          </p>
+          <p className="text-xs text-muted-foreground">
+            <strong>Optional fields:</strong> sl, tp, atr, history (OHLC array), averageAtr, accountBalance
+          </p>
+          <p className="text-xs text-emerald-600 mt-2 font-medium">
+            ✓ Bi-directional Master Scalper enabled with pattern detection, market phase analysis, and volatility alerts
           </p>
         </div>
       </main>

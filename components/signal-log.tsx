@@ -103,6 +103,35 @@ export function SignalLog({ signals }: SignalLogProps) {
     return 'bg-red-500';
   };
 
+  const getPatternColor = (pattern?: string) => {
+    if (!pattern || pattern === 'NONE') return 'bg-gray-500/10 text-gray-500';
+    // Bullish patterns
+    if (pattern === 'HAMMER' || pattern === 'BULLISH_ENGULFING') {
+      return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30';
+    }
+    // Bearish patterns
+    if (pattern === 'FALLING_STAR' || pattern === 'BEARISH_ENGULFING') {
+      return 'bg-red-500/10 text-red-500 border-red-500/30';
+    }
+    // Neutral patterns (Doji)
+    return 'bg-amber-500/10 text-amber-500 border-amber-500/30';
+  };
+
+  const getMarketPhaseLabel = (phase?: string) => {
+    const labels: Record<string, string> = {
+      MARKUP: '📈 Markup',
+      MARKDOWN: '📉 Markdown',
+      ACCUMULATION: '📊 Accumulation',
+      DISTRIBUTION: '⚠️ Distribution',
+    };
+    return labels[phase || ''] || '—';
+  };
+
+  const formatPatternName = (pattern?: string) => {
+    if (!pattern || pattern === 'NONE') return 'No Pattern';
+    return pattern.replace(/_/g, ' ');
+  };
+
   const formatTime = (date: Date) => {
     const d = new Date(date);
     return d.toLocaleTimeString('en-US', { 
@@ -126,12 +155,12 @@ export function SignalLog({ signals }: SignalLogProps) {
       className="p-4 rounded-lg border border-border bg-background hover:bg-muted/30 transition-colors"
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-1">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
             {getSignalIcon(signal.signal)}
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-foreground">{signal.symbol}</span>
               <span className={cn(
                 'px-2 py-0.5 text-xs font-medium rounded-full border',
@@ -139,10 +168,23 @@ export function SignalLog({ signals }: SignalLogProps) {
               )}>
                 {signal.signal}
               </span>
+              {signal.patternDetected && signal.patternDetected !== 'NONE' && (
+                <span className={cn(
+                  'px-2 py-0.5 text-xs font-medium rounded border',
+                  getPatternColor(signal.patternDetected)
+                )}>
+                  🔍 {formatPatternName(signal.patternDetected)}
+                </span>
+              )}
             </div>
             <p className="text-sm text-muted-foreground">
               Entry @ {signal.price.toFixed(signal.symbol.includes('JPY') ? 3 : 5)}
             </p>
+            {signal.marketPhase && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {getMarketPhaseLabel(signal.marketPhase)}
+              </p>
+            )}
             {(signal.sl || signal.tp) && (
               <div className="flex items-center gap-3 mt-1">
                 {signal.sl && (
@@ -191,6 +233,13 @@ export function SignalLog({ signals }: SignalLogProps) {
         </div>
       </div>
       
+      {/* Volatility Alert Banner */}
+      {signal.volatilityAlert && (
+        <div className="mt-3 p-2 rounded bg-orange-500/10 border border-orange-500/30">
+          <p className="text-xs text-orange-500 font-medium">{signal.volatilityAlert}</p>
+        </div>
+      )}
+      
       {/* Confidence Bar */}
       <div className="mt-3 pt-3 border-t border-border">
         <div className="flex items-center justify-between mb-2">
@@ -207,9 +256,19 @@ export function SignalLog({ signals }: SignalLogProps) {
           />
         </div>
         
+        {/* Technical Reasoning for SELL Signal */}
+        {signal.signal === 'SELL' && signal.technicalReasoning && (
+          <div className="mt-3">
+            <p className="text-xs text-muted-foreground mb-1 font-medium">Technical Reasoning</p>
+            <p className="text-sm text-foreground leading-relaxed">
+              {signal.technicalReasoning}
+            </p>
+          </div>
+        )}
+        
         {/* Full AI Technical Reasoning */}
         <div className="mt-3">
-          <p className="text-xs text-muted-foreground mb-1 font-medium">AI Technical Reasoning</p>
+          <p className="text-xs text-muted-foreground mb-1 font-medium">AI Analysis</p>
           <p className="text-sm text-foreground leading-relaxed">
             {signal.analysis}
           </p>
