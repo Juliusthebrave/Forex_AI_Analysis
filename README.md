@@ -1,35 +1,113 @@
-# v0-forex-ai-analyst
+# Forex AI Analyst - Consensus-Based Strategy
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [v0](https://v0.app).
+A high-speed Forex analysis API that uses a Consensus-Based Strategy across multiple technical indicators. Designed for MT5 integration with instant responses and professional Telegram notifications.
 
-## Built with v0
+## Features
 
-This repository is linked to a [v0](https://v0.app) project. You can continue developing by visiting the link below -- start new chats to make changes, and v0 will push commits directly to this repo. Every merge to `main` will automatically deploy.
+- **Instant Response**: Returns `{ status: 'analyzing' }` immediately to MT5
+- **Background Processing**: AI analysis runs asynchronously for speed
+- **Consensus Analysis**: 6-indicator confluence scoring (EMA, MACD, Patterns, Bollinger Bands, RSI, Volume)
+- **High Confidence Signals**: Only signals when 4+ indicators agree
+- **Professional Telegram**: Formatted signals with confluence scores and detailed reasoning
+- **Market Phase Detection**: Identifies Accumulation, Markup, Distribution, Markdown phases
+- **Volatility Alerts**: Warns of high-risk market conditions
 
-[Continue working on v0 →](https://v0.app/chat/projects/prj_OiuMIUt4YP8RjfC30xsMPJ0lKcqr)
+## API Endpoint
+
+### POST `/api/analyze`
+
+Receives MT5 data and processes it asynchronously.
+
+**Request Body:**
+```json
+{
+  "symbol": "EURUSD",
+  "price": 1.08450,
+  "ema8": 1.08420,
+  "ema20": 1.08380,
+  "ema50": 1.08250,
+  "macd": {
+    "line": 0.00015,
+    "signal": 0.00012,
+    "histogram": 0.00003
+  },
+  "bollingerBands": {
+    "upper": 1.08600,
+    "middle": 1.08400,
+    "lower": 1.08200
+  },
+  "rsi": {
+    "rsi7": 65.5,
+    "rsi14": 58.2
+  },
+  "volume": 1250,
+  "history": [
+    {"open": 1.08400, "high": 1.08500, "low": 1.08350, "close": 1.08450, "volume": 1200}
+  ],
+  "atr": 0.00120,
+  "averageAtr": 0.00100,
+  "accountBalance": 27
+}
+```
+
+**Response:**
+```json
+{
+  "status": "analyzing"
+}
+```
+
+## Environment Variables
+
+```env
+GROQ_API_KEY=your_groq_api_key
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_telegram_chat_id
+```
+
+## Telegram Message Format
+
+Professional signals sent to Telegram include:
+- 🔴/🟢 Signal indicators
+- **Confluence Score** (e.g., 67% - 4 BUY / 2 SELL indicators)
+- **Market Phase** in bold
+- Clear **Analysis** and **Reasoning** sections
+- Volatility alerts when applicable
+- Only high-confidence signals when 4+ indicators agree
 
 ## Getting Started
 
-First, run the development server:
-
+1. Install dependencies:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+```
+
+2. Set environment variables in `.env.local`
+
+3. Run development server:
+```bash
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+4. Test the API:
+```bash
+curl -X POST http://localhost:3000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"EURUSD","price":1.08450,"ema8":1.08420,"ema20":1.08380,"ema50":1.08250}'
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deployment
 
-## Learn More
+Deploy to Vercel for production:
 
-To learn more, take a look at the following resources:
+```bash
+vercel --prod
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [v0 Documentation](https://v0.app/docs) - learn about v0 and how to use it.
+## Architecture
 
-<a href="https://v0.app/chat/api/kiro/clone/Juliusthebrave/v0-forex-ai-analyst" alt="Open in Kiro"><img src="https://pdgvvgmkdvyeydso.public.blob.vercel-storage.com/open%20in%20kiro.svg?sanitize=true" /></a>
+- **Consensus Analysis**: 6-indicator confluence scoring system
+- **Pattern Detection**: Implements Homma candlestick patterns (Hammer, Engulfing, etc.)
+- **Market Phase**: Dow Theory-based phase identification
+- **AI Enhancement**: Groq Llama 3.1 8B for comprehensive analysis
+- **Async Processing**: Non-blocking API responses for MT5 compatibility

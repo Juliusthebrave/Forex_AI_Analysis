@@ -3,6 +3,7 @@ export interface OHLC {
   high: number;
   low: number;
   close: number;
+  volume?: number; // Add volume to OHLC
 }
 
 export interface ForexSignalRequest {
@@ -16,9 +17,19 @@ export interface ForexSignalRequest {
     signal: number;
     histogram: number;
   };
+  bollingerBands?: {
+    upper: number;
+    middle: number;
+    lower: number;
+  };
+  rsi?: {
+    rsi7: number;
+    rsi14: number;
+  };
+  atr?: number;
+  volume?: number;
   sl?: number;
   tp?: number;
-  atr?: number;
   history?: OHLC[]; // Last 4 candles OHLC data
   averageAtr?: number; // Average ATR for volatility comparison
 }

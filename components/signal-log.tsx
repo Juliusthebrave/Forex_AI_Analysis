@@ -93,6 +93,19 @@ export function SignalLog({ signals = [] }: SignalLogProps) {
     }
   };
 
+  const getRiskBadgeClass = (riskLevel: string) => {
+    switch (riskLevel) {
+      case 'LOW':
+        return 'bg-emerald-500/10 text-emerald-500';
+      case 'MEDIUM':
+        return 'bg-amber-500/10 text-amber-500';
+      case 'HIGH':
+        return 'bg-red-500/10 text-red-500';
+      default:
+        return 'bg-gray-500/10 text-gray-500';
+    }
+  };
+
   const getConfidenceBarColor = (confidence: number) => {
     if (confidence >= 70) return 'bg-emerald-500';
     if (confidence >= 50) return 'bg-amber-500';
