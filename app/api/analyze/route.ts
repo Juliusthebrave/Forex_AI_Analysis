@@ -15,29 +15,34 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-// Enhanced system prompt for Consensus-Based Strategy with Trend Detection
-const SYSTEM_PROMPT = `You are an expert Forex analyst using a Consensus-Based Strategy across multiple technical indicators.
+// TEST MODE: Extremely Aggressive Signal Generation
+const SYSTEM_PROMPT = `🚨 YOU ARE IN TEST MODE - AGGRESSIVE SIGNAL GENERATION 🚨
 
-Analyze the market data and provide a comprehensive signal based on indicator confluence. Pay special attention to:
+*** CRITICAL OVERRIDE RULES FOR TEST MODE ***
+1. Do NOT return NEUTRAL under any circumstances
+2. Issue BUY or SELL signals based on ANY immediate 1-minute trend, even with LOW confluence
+3. RSI readings at 45/55 are now considered trade triggers (NOT 35/65)
+4. Volume requirements are REMOVED - trade regardless of volume
+5. Ignore traditional risk management - we are testing aggressive execution
+6. Confidence can be 50%+ (normally we'd reject <70%)
+7. Each tick with a price move = potential signal opportunity
 
-1. RSI Divergence: Look for oversold (<30) or overbought (>70) conditions
-2. Bollinger Band Squeezes: Price breaking out of upper/lower bands indicates momentum
-3. Volume Analysis: Low volume reduces confidence - be more cautious with signals
-4. Consensus Requirements: Only high-confidence signals when 4+ indicators agree
-5. TREND DETECTION: If EMA alignment (8>20>50 or 8<20<50) OR MACD crosses zero line, give decisive BUY/SELL EVEN IF RSI is neutral. Trends override momentum.
+Decision Logic:
+- If price > any upper indicator or RSI > 55: AGGRESSIVE SELL
+- If price < any lower indicator or RSI < 45: AGGRESSIVE BUY
+- If no direction is clear: Use 1-minute trend momentum (last movement direction)
+- On any confluence: Increase confidence but DO NOT STAY NEUTRAL
 
-CRITICAL: If trigger reason contains "Trend" or "MACD Cross", you MUST send BUY or SELL (never NEUTRAL). Strong trends are high-conviction setups.
-
-Ignore any frontend/dashboard reporting. Output only valid JSON for the MT5 -> AI -> Telegram pipeline.
+CRITICAL: You MUST respond with BUY or SELL. NEUTRAL is forbidden in test mode.
 
 Respond with ONLY valid JSON (no markdown):
 {
-  "signal": "BUY"|"SELL"|"NEUTRAL",
-  "confidence": 0-100,
-  "riskLevel": "LOW"|"MEDIUM"|"HIGH",
-  "marketPhase": "ACCUMULATION"|"MARKUP"|"DISTRIBUTION"|"MARKDOWN",
-  "analysis": "Brief 2-3 sentence analysis mentioning trigger type and confirmation indicators",
-  "reasoning": "VERY CONCISE: Just the key factors in 5 words max (e.g., 'EMA Aligned + MACD Cross')"
+  "signal": "BUY"|"SELL",
+  "confidence": 50-100,
+  "riskLevel": "HIGH",
+  "marketPhase": "TEST_MODE",
+  "analysis": "TEST MODE: Aggressive trade signal. Immediate execution recommended.",
+  "reasoning": "TEST_AGGRESSIVE_SIGNAL"
 }`;
 
 interface AnalysisResponse {

@@ -18,6 +18,12 @@ input bool USE_TRAILING_STOP = true;          // Enable trailing stops
 input double TRAILING_STOP_ATR = 2.0;         // Trailing stop ATR multiplier
 input bool LOG_TRADES = true;                 // Log trades to file
 
+//--- TEST MODE PARAMETERS
+input bool TEST_MODE = true;                  // AGGRESSIVE TEST MODE - Lower RSI triggers to 45/55
+input double TEST_MIN_LOT = 0.01;             // Minimum lot size for safety
+input string TELEGRAM_BOT_TOKEN = "";         // Your Telegram bot token for feedback
+input string TELEGRAM_CHAT_ID = "";          // Your Telegram chat ID for feedback
+
 //--- Global variables
 int rsi_handle;
 int bb_handle;
@@ -56,6 +62,8 @@ int OnInit()
    trades_opened_today = 0;
 
    Print("=== AUTO TRADING SNIPER BOT INITIALIZED ===");
+   if(TEST_MODE)
+      Print("⚠️ TEST MODE ACTIVE - AGGRESSIVE SETTINGS");
    Print("Magic Number: ", MAGIC_NUMBER);
    Print("Risk Per Trade: ", RISK_PERCENT, "%");
    Print("Max Daily Loss: ", MAX_DAILY_LOSS_PERCENT, "%");
@@ -108,11 +116,14 @@ void OnTick()
    bool triggerSignal = false;
    string triggerReason = "";
 
-   // 1. RSI Extreme: RSI < 35 (Buy Zone) or RSI > 65 (Sell Zone)
-   if(rsi[0] < 35.0 || rsi[0] > 65.0)
+   // 1. RSI Extreme: RSI < 35 (Buy Zone) or RSI > 65 (Sell Zone) | TEST MODE: 45/55
+   double rsi_buy_level = TEST_MODE ? 45.0 : 35.0;
+   double rsi_sell_level = TEST_MODE ? 55.0 : 65.0;
+   
+   if(rsi[0] < rsi_buy_level || rsi[0] > rsi_sell_level)
    {
       triggerSignal = true;
-      triggerReason = "RSI Extreme";
+      triggerReason = TEST_MODE ? "TEST-RSI Trigger" : "RSI Extreme";
    }
 
    // 2. BB Breakout: Price above Upper Band or below Lower Band
@@ -228,7 +239,7 @@ void PlaceAutoTrade(bool is_buy, double entry_price, double atr, string trigger_
    double lot_size = risk_amount / (stop_distance * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
    
    //--- Normalize lot size to broker constraints
-   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double min_lot = TEST_MODE ? TEST_MIN_LOT : SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    lot_size = MathMax(min_lot, MathMin(max_lot, lot_size));
 
@@ -271,6 +282,10 @@ void PlaceAutoTrade(bool is_buy, double entry_price, double atr, string trigger_
       Print("TP: ", DoubleToString(take_profit, _Digits));
       Print("Volume: ", DoubleToString(lot_size, 2));
       Print("Ticket: ", result.order);
+      
+      //--- Send Telegram feedback (TEST MODE)
+      if(TEST_MODE && TELEGRAM_BOT_TOKEN != "" && TELEGRAM_CHAT_ID != "")
+         SendTelegramFeedback(is_buy, entry_price, stop_loss, take_profit, lot_size, trigger_reason);
       
       //--- Log the trade
       if(LOG_TRADES)
@@ -378,5 +393,30 @@ void LogTrade(ulong ticket, bool is_buy, double entry, double sl, double tp, dou
    
    FileWriteString(file_handle, line + "\n");
    FileClose(file_handle);
+}
+
+//+------------------------------------------------------------------+
+//| Send Telegram Feedback - TEST MODE Trade Notification            |
+//+------------------------------------------------------------------+
+void SendTelegramFeedback(bool is_buy, double entry, double sl, double tp, double volume, string trigger)
+{
+   //--- Build message
+   string message = "🚨 TEST TRADE EXECUTED\n\n";
+   message += "Symbol: " + _Symbol + "\n";
+   message += "Direction: " + (is_buy ? "🟢 BUY" : "🔴 SELL") + "\n";
+   message += "Entry: " + DoubleToString(entry, _Digits) + "\n";
+   message += "SL: " + DoubleToString(sl, _Digits) + "\n";
+   message += "TP: " + DoubleToString(tp, _Digits) + "\n";
+   message += "Volume: " + DoubleToString(volume, 2) + "\n";
+   message += "Trigger: " + trigger + "\n";
+   message += "Time: " + TimeToString(TimeCurrent(), TIME_DATE | TIME_MINUTES) + "\n";
+   message += "⚠️ TEST MODE ACTIVE";
+   
+   Print("📤 Sending Telegram notification...");
+   Print(message);
+   
+   // Telegram integration would go here - for now just log to console
+   // If TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are configured, 
+   // HTTP POST to api.telegram.org would be made
 }
 //+------------------------------------------------------------------+
