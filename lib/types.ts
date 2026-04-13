@@ -17,17 +17,11 @@ export interface ForexSignalRequest {
     signal: number;
     histogram: number;
   };
-  bollingerBands?: {
-    upper: number;
-    middle: number;
-    lower: number;
-  };
-  rsi?: {
-    rsi7: number;
-    rsi14: number;
-  };
+  upperBB?: number;
+  lowerBB?: number;
+  rsi?: number;
   atr?: number;
-  volume?: number;
+  vol?: number;
   sl?: number;
   tp?: number;
   history?: OHLC[]; // Last 4 candles OHLC data

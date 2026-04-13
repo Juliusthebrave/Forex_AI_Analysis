@@ -18,7 +18,12 @@ const groq = createGroq({
 // Enhanced system prompt for Consensus-Based Strategy
 const SYSTEM_PROMPT = `You are an expert Forex analyst using a Consensus-Based Strategy across multiple technical indicators.
 
-Analyze the market data and provide a comprehensive signal based on indicator confluence.
+Analyze the market data and provide a comprehensive signal based on indicator confluence. Pay special attention to:
+
+1. RSI Divergence: Look for oversold (<30) or overbought (>70) conditions
+2. Bollinger Band Squeezes: Price breaking out of upper/lower bands indicates momentum
+3. Volume Analysis: Low volume reduces confidence - be more cautious with signals
+4. Consensus Requirements: Only high-confidence signals when 4+ indicators agree
 
 Respond with ONLY valid JSON (no markdown):
 {
@@ -26,8 +31,8 @@ Respond with ONLY valid JSON (no markdown):
   "confidence": 0-100,
   "riskLevel": "LOW"|"MEDIUM"|"HIGH",
   "marketPhase": "ACCUMULATION"|"MARKUP"|"DISTRIBUTION"|"MARKDOWN",
-  "analysis": "Brief 2-3 sentence analysis based on consensus indicators",
-  "reasoning": "Detailed technical reasoning including confluence score and indicator agreements"
+  "analysis": "Brief 2-3 sentence analysis mentioning RSI levels, Bollinger Band position, and volume impact",
+  "reasoning": "VERY CONCISE: Just the key factors in 5 words max (e.g., 'RSI Oversold + Hammer Pattern')"
 }`;
 
 interface AnalysisResponse {
@@ -60,9 +65,10 @@ export async function POST(req: Request) {
       ema20,
       ema50,
       macd,
-      bollingerBands,
+      upperBB,
+      lowerBB,
       rsi,
-      volume,
+      vol,
       accountBalance = 27,
       history = [],
       atr,
@@ -88,9 +94,10 @@ export async function POST(req: Request) {
       ema20,
       ema50,
       macd,
-      bollingerBands,
+      upperBB,
+      lowerBB,
       rsi,
-      volume,
+      vol,
       accountBalance,
       history,
       atr,
@@ -116,15 +123,16 @@ async function processAnalysisInBackground(data: {
   ema20: number;
   ema50: number;
   macd: any;
-  bollingerBands?: any;
-  rsi?: any;
-  volume?: number;
+  upperBB?: number;
+  lowerBB?: number;
+  rsi?: number;
+  vol?: number;
   accountBalance: number;
   history: any[];
   atr?: number;
   averageAtr?: number;
 }) {
-  const { symbol, price, ema8, ema20, ema50, macd, bollingerBands, rsi, volume, accountBalance, history, atr, averageAtr } = data;
+  const { symbol, price, ema8, ema20, ema50, macd, upperBB, lowerBB, rsi, vol, accountBalance, history, atr, averageAtr } = data;
 
   try {
     console.log('[BACKGROUND] Starting Consensus-Based analysis...');
@@ -143,9 +151,10 @@ async function processAnalysisInBackground(data: {
       ema50,
       macdHistogram: macd?.histogram || 0,
       pattern,
-      bollingerBands,
+      upperBB,
+      lowerBB,
       rsi,
-      volume,
+      vol,
       history
     });
 
@@ -197,19 +206,39 @@ async function processAnalysisInBackground(data: {
       reasoning: 'Technical analysis based on consensus indicators'
     };
 
+    // Adjust confidence based on volume - low volume reduces confidence
+    if (vol !== undefined && history.length > 0) {
+      const avgVolume = history.reduce((sum, candle) => sum + (candle.volume || 0), 0) / history.length;
+      if (vol < avgVolume * 0.7) {
+        // Low volume - reduce confidence by 15-20 points
+        aiResponse.confidence = Math.max(10, aiResponse.confidence - 20);
+        console.log('[BACKGROUND] Low volume detected - reducing confidence');
+      }
+    }
+
     try {
       const userPrompt = `Consensus-Based Analysis for ${symbol}:
 Price: ${price}
 EMAs: 8=${ema8}, 20=${ema20}, 50=${ema50}
 MACD Histogram: ${macd?.histogram ?? 'N/A'}
 Pattern: ${pattern}
-Bollinger Bands: ${bollingerBands ? `Upper=${bollingerBands.upper}, Lower=${bollingerBands.lower}` : 'N/A'}
-RSI: ${rsi ? `7=${rsi.rsi7}, 14=${rsi.rsi14}` : 'N/A'}
-Volume: ${volume ?? 'N/A'}
+Bollinger Bands: ${upperBB && lowerBB ? `Upper=${upperBB}, Lower=${lowerBB}` : 'N/A'}
+RSI: ${rsi ?? 'N/A'}
+Volume: ${vol ?? 'N/A'}
 Consensus: ${consensus.buyIndicators} BUY, ${consensus.sellIndicators} SELL indicators agree
 Confluence Score: ${consensus.confluenceScore}%
 High Confidence: ${consensus.highConfidence}
 Market Phase: ${marketPhase}
+
+IMPORTANT:
+- Analyze RSI for divergence (oversold <30, overbought >70)
+- Check for Bollinger Band squeezes/breakouts
+- If volume is low, reduce confidence and be more cautious
+- Only give strong signals when multiple indicators align
+
+CRITICAL: Keep reasoning EXTREMELY CONCISE - maximum 5 words (e.g., 'RSI Oversold + Hammer')
+
+CRITICAL: Keep reasoning EXTREMELY CONCISE - maximum 5 words (e.g., 'RSI Oversold + Hammer')
 
 Provide comprehensive analysis following consensus-based strategy principles.`;
 
@@ -259,7 +288,11 @@ Provide comprehensive analysis following consensus-based strategy principles.`;
       pattern,
       volatilityAlert: volatility.alert,
       confluenceScore: consensus.confluenceScore,
-      indicatorBreakdown: `${consensus.buyIndicators} BUY / ${consensus.sellIndicators} SELL indicators`
+      indicatorBreakdown: `${consensus.buyIndicators} BUY / ${consensus.sellIndicators} SELL indicators`,
+      rsi,
+      upperBB,
+      lowerBB,
+      atr
     });
 
     console.log('[BACKGROUND] Analysis complete and sent to Telegram');
@@ -283,6 +316,7 @@ Provide comprehensive analysis following consensus-based strategy principles.`;
 }
 
 // Professional Telegram message formatting
+// Simplified Telegram message formatting
 async function sendProfessionalTelegramSignal(message: {
   symbol: string;
   signal: SignalType;
@@ -296,6 +330,10 @@ async function sendProfessionalTelegramSignal(message: {
   volatilityAlert: string;
   confluenceScore: number;
   indicatorBreakdown: string;
+  rsi?: number;
+  upperBB?: number;
+  lowerBB?: number;
+  atr?: number;
 }): Promise<void> {
   const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
   const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -305,31 +343,60 @@ async function sendProfessionalTelegramSignal(message: {
     return;
   }
 
-  const signalEmoji = message.signal === 'BUY' ? '🟢' : message.signal === 'SELL' ? '🔴' : '⚪';
-  const riskEmoji = message.riskLevel === 'LOW' ? '🟢' : message.riskLevel === 'MEDIUM' ? '🟡' : '🔴';
+  // Handle NEUTRAL signals with minimal message
+  if (message.signal === 'NEUTRAL') {
+    const text = `⚪ ${message.symbol}: NEUTRAL (Waiting for Confluence)`;
+    try {
+      await fetch(
+        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: TELEGRAM_CHAT_ID,
+            text,
+            parse_mode: 'Markdown',
+          }),
+        }
+      );
+    } catch (error) {
+      console.error('[TELEGRAM] Failed to send neutral signal:', error);
+    }
+    return;
+  }
 
-  const text = `
-${signalEmoji} **FOREX AI SIGNAL** ${signalEmoji}
+  // Calculate TP/SL levels using ATR
+  const atr = message.atr || 0.001; // Default ATR if not provided
+  const riskMultiplier = message.riskLevel === 'HIGH' ? 1 : message.riskLevel === 'MEDIUM' ? 1.5 : 2;
+  const rewardMultiplier = 3; // 3:1 reward-to-risk ratio
 
-**📊 Pair:** ${message.symbol}
-**🎯 Signal:** ${message.signal}
-**💰 Price:** ${message.price.toFixed(5)}
-**📈 Confidence:** ${message.confidence}%
-**⚠️ Risk Level:** ${riskEmoji} ${message.riskLevel}
+  let stopLoss: number;
+  let takeProfit: number;
 
-**🌊 Market Phase:** **${message.marketPhase}**
-**🔍 Pattern:** ${message.pattern}
-**📊 Confluence Score:** ${message.confluenceScore}% (${message.indicatorBreakdown})
+  if (message.signal === 'BUY') {
+    stopLoss = message.price - (atr * riskMultiplier);
+    takeProfit = message.price + (atr * rewardMultiplier);
+  } else { // SELL
+    stopLoss = message.price + (atr * riskMultiplier);
+    takeProfit = message.price - (atr * rewardMultiplier);
+  }
 
-**📝 Analysis:**
-${message.analysis}
+  // Create concise reasoning (max 5 words)
+  const conciseReasoning = message.reasoning
+    .split(' ')
+    .slice(0, 5)
+    .join(' ')
+    .replace(/[.,;:!?]$/, ''); // Remove trailing punctuation
 
-**🧠 Reasoning:**
-${message.reasoning}
+  const signalEmoji = message.signal === 'BUY' ? '🟢' : '🔴';
 
-${message.volatilityAlert ? `**🚨 Alert:** ${message.volatilityAlert}\n` : ''}
-_Generated: ${new Date().toISOString()}_
-  `.trim();
+  const text = `${signalEmoji} ${message.signal} ${message.symbol}
+
+🎯 Entry: ${message.price.toFixed(5)}
+🛑 Stop Loss: ${stopLoss.toFixed(5)}
+💰 Take Profit: ${takeProfit.toFixed(5)}
+
+📊 ${conciseReasoning}`.trim();
 
   try {
     const response = await fetch(
@@ -347,11 +414,9 @@ _Generated: ${new Date().toISOString()}_
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('[TELEGRAM] API error:', error);
-    } else {
-      console.log('[TELEGRAM] ✓ Professional signal sent successfully');
+      console.error('[TELEGRAM] Failed to send signal:', error);
     }
   } catch (error) {
-    console.error('[TELEGRAM] Failed to send message:', error);
+    console.error('[TELEGRAM] Error sending signal:', error);
   }
 }

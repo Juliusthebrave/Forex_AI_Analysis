@@ -196,9 +196,10 @@ export function performConsensusAnalysis(params: {
   ema50: number;
   macdHistogram: number;
   pattern: PatternType;
-  bollingerBands?: { upper: number; middle: number; lower: number };
-  rsi?: { rsi7: number; rsi14: number };
-  volume?: number;
+  upperBB?: number;
+  lowerBB?: number;
+  rsi?: number;
+  vol?: number;
   history?: OHLC[];
 }): ConsensusResult {
   const {
@@ -208,9 +209,10 @@ export function performConsensusAnalysis(params: {
     ema50,
     macdHistogram,
     pattern,
-    bollingerBands,
+    upperBB,
+    lowerBB,
     rsi,
-    volume,
+    vol,
     history = []
   } = params;
 
@@ -218,9 +220,9 @@ export function performConsensusAnalysis(params: {
     emaAlignment: analyzeEMAAlignment(price, ema8, ema20, ema50),
     macdSignal: analyzeMACDSignal(macdHistogram),
     patternSignal: analyzePatternSignal(pattern),
-    bollingerBands: analyzeBollingerBands(price, bollingerBands),
+    bollingerBands: analyzeBollingerBands(price, upperBB, lowerBB),
     rsiDivergence: analyzeRSIDivergence(rsi, history),
-    volumeConfirmation: analyzeVolumeConfirmation(volume, history)
+    volumeConfirmation: analyzeVolumeConfirmation(vol, history)
   };
 
   // Count agreements
@@ -286,15 +288,13 @@ function analyzePatternSignal(pattern: PatternType): 'BUY' | 'SELL' | 'NEUTRAL' 
 /**
  * Analyzes Bollinger Bands for overextension (volatility)
  */
-function analyzeBollingerBands(price: number, bands?: { upper: number; middle: number; lower: number }): 'BUY' | 'SELL' | 'NEUTRAL' {
-  if (!bands) return 'NEUTRAL';
-
-  const { upper, lower } = bands;
+function analyzeBollingerBands(price: number, upperBB?: number, lowerBB?: number): 'BUY' | 'SELL' | 'NEUTRAL' {
+  if (!upperBB || !lowerBB) return 'NEUTRAL';
 
   // Price below lower band = oversold (potential BUY)
-  if (price < lower) return 'BUY';
+  if (price < lowerBB) return 'BUY';
   // Price above upper band = overbought (potential SELL)
-  if (price > upper) return 'SELL';
+  if (price > upperBB) return 'SELL';
 
   return 'NEUTRAL';
 }
@@ -302,15 +302,12 @@ function analyzeBollingerBands(price: number, bands?: { upper: number; middle: n
 /**
  * Analyzes RSI for divergence signals
  */
-function analyzeRSIDivergence(rsi?: { rsi7: number; rsi14: number }, history?: OHLC[]): 'BUY' | 'SELL' | 'NEUTRAL' {
+function analyzeRSIDivergence(rsi?: number, history?: OHLC[]): 'BUY' | 'SELL' | 'NEUTRAL' {
   if (!rsi || !history || history.length < 3) return 'NEUTRAL';
 
-  const { rsi7, rsi14 } = rsi;
-
-  // Simple divergence check: RSI7 and RSI14 both oversold (<30) = potential BUY
-  if (rsi7 < 30 && rsi14 < 30) return 'BUY';
-  // Both overbought (>70) = potential SELL
-  if (rsi7 > 70 && rsi14 > 70) return 'SELL';
+  // Simple RSI analysis: oversold (<30) = potential BUY, overbought (>70) = potential SELL
+  if (rsi < 30) return 'BUY';
+  if (rsi > 70) return 'SELL';
 
   return 'NEUTRAL';
 }
