@@ -25,6 +25,8 @@ Analyze the market data and provide a comprehensive signal based on indicator co
 3. Volume Analysis: Low volume reduces confidence - be more cautious with signals
 4. Consensus Requirements: Only high-confidence signals when 4+ indicators agree
 
+Ignore any frontend/dashboard reporting. Output only valid JSON for the MT5 -> AI -> Telegram pipeline.
+
 Respond with ONLY valid JSON (no markdown):
 {
   "signal": "BUY"|"SELL"|"NEUTRAL",
@@ -85,9 +87,9 @@ export async function POST(req: Request) {
     // Return immediately to MT5 so it doesn't wait
     const instantResponse = Response.json({ status: 'analyzing' });
 
-    // ========== STEP 4: BACKGROUND PROCESSING ==========
-    // Process AI analysis and Telegram in background
-    processAnalysisInBackground({
+    // ========== STEP 4: HEADLESS BACKGROUND PROCESSING ==========
+    // Process MT5 -> AI -> Telegram only; do not update any web dashboard
+    void processAnalysisInBackground({
       symbol,
       price,
       ema8,

@@ -5,6 +5,7 @@ A high-speed Forex analysis API that uses a Consensus-Based Strategy across mult
 ## Features
 
 - **Instant Response**: Returns `{ status: 'analyzing' }` immediately to MT5
+- **Headless Bot**: No frontend dashboard, MT5 -> AI -> Telegram only
 - **Background Processing**: AI analysis runs asynchronously for speed
 - **Consensus Analysis**: 6-indicator confluence scoring (EMA, MACD, Patterns, Bollinger Bands, RSI, Volume)
 - **High Confidence Signals**: Only signals when 4+ indicators agree, with volume-based caution
