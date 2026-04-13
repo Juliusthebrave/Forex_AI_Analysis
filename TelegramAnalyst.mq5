@@ -1,16 +1,22 @@
 //+------------------------------------------------------------------+
-//|                                                TelegramAnalyst.mq5 |
+//|                          AutoTradingSniper.mq5 - Full Auto Trading |
 //|                        Copyright 2024, MetaQuotes Software Corp. |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, MetaQuotes Software Corp."
 #property link      "https://www.mql5.com"
-#property version   "1.00"
+#property version   "2.00 - Auto Trading"
 
 //--- Input parameters
-input string API_URL = "https://your-vercel-app.vercel.app/api/analyze"; // Your Vercel API URL
-input int MAGIC_NUMBER = 123456; // Magic number for orders
-input double LOT_SIZE = 0.01; // Lot size for orders
+input int MAGIC_NUMBER = 123456;              // Magic number for orders
+input double RISK_PERCENT = 1.0;              // Risk per trade (%)
+input double MAX_DAILY_LOSS_PERCENT = 5.0;    // Max daily loss (%)
+input int MAX_OPEN_POSITIONS = 1;             // Max concurrent trades
+input double STOP_MULTIPLIER = 1.5;           // ATR multiplier for SL
+input double TP_MULTIPLIER = 3.0;             // ATR multiplier for TP (3:1 ratio)
+input bool USE_TRAILING_STOP = true;          // Enable trailing stops
+input double TRAILING_STOP_ATR = 2.0;         // Trailing stop ATR multiplier
+input bool LOG_TRADES = true;                 // Log trades to file
 
 //--- Global variables
 int rsi_handle;
@@ -19,6 +25,10 @@ int ema8_handle;
 int ema20_handle;
 int ema50_handle;
 int macd_handle;
+
+//--- Account tracking
+double daily_started_balance = 0;
+int trades_opened_today = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -41,7 +51,16 @@ int OnInit()
       return(INIT_FAILED);
    }
 
-   Print("TelegramAnalyst initialized successfully");
+   //--- Initialize daily balance tracking
+   daily_started_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   trades_opened_today = 0;
+
+   Print("=== AUTO TRADING SNIPER BOT INITIALIZED ===");
+   Print("Magic Number: ", MAGIC_NUMBER);
+   Print("Risk Per Trade: ", RISK_PERCENT, "%");
+   Print("Max Daily Loss: ", MAX_DAILY_LOSS_PERCENT, "%");
+   Print("Max Open Positions: ", MAX_OPEN_POSITIONS);
+   Print("Starting Balance: $", DoubleToString(daily_started_balance, 2));
    return(INIT_SUCCEEDED);
 }
 
@@ -148,90 +167,216 @@ void OnTick()
    if(!triggerSignal)
    {
       Print("Market Quiet - No Signal");
+      
+      // Monitor existing positions for trailing stops
+      if(USE_TRAILING_STOP)
+         UpdateTrailingStops();
+      
       return;
    }
 
-   //--- TRIGGER DETECTED: Send to Vercel API
-   Print("Sniper Trigger: ", triggerReason, " - Sending to AI Analysis");
+   //--- RISK MANAGEMENT CHECKS ---
+   
+   // Check daily loss limit
+   double current_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double daily_loss = daily_started_balance - current_balance;
+   double max_daily_loss = daily_started_balance * (MAX_DAILY_LOSS_PERCENT / 100.0);
+   
+   if(daily_loss > max_daily_loss)
+   {
+      Print("⛔ DAILY LOSS LIMIT EXCEEDED ($", DoubleToString(daily_loss, 2), "). No more trades today.");
+      return;
+   }
+   
+   // Check max open positions
+   int open_positions = 0;
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      if(PositionSelect(i) && PositionGetInteger(POSITION_MAGIC) == MAGIC_NUMBER)
+         open_positions++;
+   }
+   
+   if(open_positions >= MAX_OPEN_POSITIONS)
+   {
+      Print("⛔ MAX OPEN POSITIONS (", MAX_OPEN_POSITIONS, ") REACHED. Waiting for exit.");
+      return;
+   }
 
-   SendToVercel(price, rsi[0], upperBB[0], lowerBB[0], ema8[0], ema20[0], ema50[0], triggerReason);
+   //--- TRIGGER DETECTED: Execute Trade ---
+   double atr = iATR(_Symbol, PERIOD_CURRENT, 14);
+   
+   // Determine direction
+   bool is_buy = (rsi[0] < 35.0) || (bullish_alignment) || (macd_was_negative && macd_is_positive);
+   
+   Print("🎯 SNIPER TRIGGER: ", triggerReason);
+   PlaceAutoTrade(is_buy, price, atr, triggerReason);
+   
+   // Update trailing stops on existing positions
+   if(USE_TRAILING_STOP)
+      UpdateTrailingStops();
 }
 
 //+------------------------------------------------------------------+
-//| Send data to Vercel API                                          |
+//| Auto Trade Execution - Places order with SL/TP automatically     |
 //+------------------------------------------------------------------+
-void SendToVercel(double price, double rsi, double upperBB, double lowerBB, double ema8, double ema20, double ema50, string triggerReason)
+void PlaceAutoTrade(bool is_buy, double entry_price, double atr, string trigger_reason)
 {
-   //--- Prepare JSON payload
-   string json = "{";
-   json += "\"symbol\":\"" + _Symbol + "\",";
-   json += "\"price\":" + DoubleToString(price, 5) + ",";
-   json += "\"ema8\":" + DoubleToString(ema8, 5) + ",";
-   json += "\"ema20\":" + DoubleToString(ema20, 5) + ",";
-   json += "\"ema50\":" + DoubleToString(ema50, 5) + ",";
-   json += "\"rsi\":" + DoubleToString(rsi, 2) + ",";
-   json += "\"upperBB\":" + DoubleToString(upperBB, 5) + ",";
-   json += "\"lowerBB\":" + DoubleToString(lowerBB, 5) + ",";
-   json += "\"vol\":" + IntegerToString(iVolume(_Symbol, PERIOD_CURRENT, 0)) + ",";
-   json += "\"atr\":" + DoubleToString(iATR(_Symbol, PERIOD_CURRENT, 14), 5) + ",";
-   json += "\"averageAtr\":" + DoubleToString(iATR(_Symbol, PERIOD_CURRENT, 14), 5) + ",";
-   json += "\"accountBalance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2);
+   //--- Calculate position size based on risk
+   double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double risk_amount = account_balance * (RISK_PERCENT / 100.0);
+   double stop_distance = atr * STOP_MULTIPLIER;
+   double lot_size = risk_amount / (stop_distance * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+   
+   //--- Normalize lot size to broker constraints
+   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   lot_size = MathMax(min_lot, MathMin(max_lot, lot_size));
 
-   //--- Add MACD data
-   double macd_main[1], macd_signal[1], macd_histogram[1];
-   int macd_handle = iMACD(_Symbol, PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE);
-   CopyBuffer(macd_handle, 0, 0, 1, macd_main);
-   CopyBuffer(macd_handle, 1, 0, 1, macd_signal);
-   CopyBuffer(macd_handle, 2, 0, 1, macd_histogram);
-
-   json += ",\"macd\":{\"line\":" + DoubleToString(macd_main[0], 6) + ",";
-   json += "\"signal\":" + DoubleToString(macd_signal[0], 6) + ",";
-   json += "\"histogram\":" + DoubleToString(macd_histogram[0], 6) + "}";
-
-   //--- Add price history (last 20 candles)
-   json += ",\"history\":[";
-   for(int i = 19; i >= 0; i--)
+   //--- Calculate SL/TP levels
+   double stop_loss, take_profit;
+   
+   if(is_buy)
    {
-      double open = iOpen(_Symbol, PERIOD_CURRENT, i);
-      double high = iHigh(_Symbol, PERIOD_CURRENT, i);
-      double low = iLow(_Symbol, PERIOD_CURRENT, i);
-      double close = iClose(_Symbol, PERIOD_CURRENT, i);
-      long volume = iVolume(_Symbol, PERIOD_CURRENT, i);
-
-      json += "{\"open\":" + DoubleToString(open, 5) + ",";
-      json += "\"high\":" + DoubleToString(high, 5) + ",";
-      json += "\"low\":" + DoubleToString(low, 5) + ",";
-      json += "\"close\":" + DoubleToString(close, 5) + ",";
-      json += "\"volume\":" + IntegerToString(volume) + "}";
-
-      if(i > 0) json += ",";
-   }
-   json += "]";
-
-   //--- Add trigger reason for AI context
-   json += ",\"triggerReason\":\"" + triggerReason + "\"";
-
-   json += "}";
-
-   //--- Send HTTP POST request
-   string headers = "Content-Type: application/json";
-   char data[];
-   StringToCharArray(json, data, 0, StringLen(json));
-
-   int timeout = 5000; // 5 seconds timeout
-
-   string result = "";
-   int res = WebRequest("POST", API_URL, headers, timeout, data, result, "");
-
-   if(res == 200)
-   {
-      Print("Successfully sent data to Vercel API");
+      stop_loss = entry_price - stop_distance;
+      take_profit = entry_price + (atr * TP_MULTIPLIER);
    }
    else
    {
-      Print("Error sending data to Vercel API. Response code: ", res);
+      stop_loss = entry_price + stop_distance;
+      take_profit = entry_price - (atr * TP_MULTIPLIER);
    }
 
-   IndicatorRelease(macd_handle);
+   //--- Prepare order
+   MqlTradeRequest request = {};
+   MqlTradeResult result = {};
+   
+   request.action = TRADE_ACTION_DEAL;
+   request.symbol = _Symbol;
+   request.volume = lot_size;
+   request.type = is_buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   request.price = is_buy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   request.sl = stop_loss;
+   request.tp = take_profit;
+   request.deviation = 20;  // Max slippage
+   request.magic = MAGIC_NUMBER;
+   request.comment = trigger_reason;
+
+   //--- Send order
+   if(OrderSend(request, result))
+   {
+      Print("✅ AUTO TRADE EXECUTED!");
+      Print("Type: ", is_buy ? "BUY" : "SELL");
+      Print("Entry: ", DoubleToString(entry_price, _Digits));
+      Print("SL: ", DoubleToString(stop_loss, _Digits));
+      Print("TP: ", DoubleToString(take_profit, _Digits));
+      Print("Volume: ", DoubleToString(lot_size, 2));
+      Print("Ticket: ", result.order);
+      
+      //--- Log the trade
+      if(LOG_TRADES)
+         LogTrade(result.order, is_buy, entry_price, stop_loss, take_profit, lot_size, trigger_reason);
+      
+      trades_opened_today++;
+   }
+   else
+   {
+      Print("❌ Order Failed!");
+      Print("Error Code: ", result.retcode);
+      Print("Error Description: ", result.comment);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Update Trailing Stops - Move SL closer if trade is profitable    |
+//+------------------------------------------------------------------+
+void UpdateTrailingStops()
+{
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      if(!PositionSelect(i))
+         continue;
+      
+      if(PositionGetInteger(POSITION_MAGIC) != MAGIC_NUMBER)
+         continue;
+      
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double current_sl = PositionGetDouble(POSITION_SL);
+      double current = SymbolInfoDouble(_Symbol, PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? SYMBOL_BID : SYMBOL_ASK);
+      double atr = iATR(_Symbol, PERIOD_CURRENT, 14);
+      double trailing_distance = atr * TRAILING_STOP_ATR;
+
+      MqlTradeRequest request = {};
+      MqlTradeResult result = {};
+      
+      bool should_modify = false;
+
+      if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
+      {
+         // For BUY: If price moved up, trail the stop
+         if(current > entry + trailing_distance)
+         {
+            double new_sl = current - trailing_distance;
+            if(new_sl > current_sl)
+            {
+               request.sl = new_sl;
+               should_modify = true;
+            }
+         }
+      }
+      else
+      {
+         // For SELL: If price moved down, trail the stop
+         if(current < entry - trailing_distance)
+         {
+            double new_sl = current + trailing_distance;
+            if(new_sl < current_sl || current_sl == 0)
+            {
+               request.sl = new_sl;
+               should_modify = true;
+            }
+         }
+      }
+
+      if(should_modify)
+      {
+         request.action = TRADE_ACTION_SLTP;
+         request.position = PositionGetInteger(POSITION_TICKET);
+         request.tp = PositionGetDouble(POSITION_TP);
+         
+         if(OrderSend(request, result))
+         {
+            Print("📊 Trailing Stop Updated - Ticket: ", result.order);
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Log Trade - Save trade data to file for analysis                 |
+//+------------------------------------------------------------------+
+void LogTrade(ulong ticket, bool is_buy, double entry, double sl, double tp, double volume, string reason)
+{
+   string filename = "AutoTrading_" + _Symbol + ".csv";
+   
+   int file_handle = FileOpen(filename, FILE_READ | FILE_WRITE | FILE_CSV, ",");
+   if(file_handle == INVALID_HANDLE)
+      return;
+
+   FileSeek(file_handle, 0, SEEK_END);  // Go to end of file
+   
+   //--- Write trade data
+   string line = TimeToString(TimeCurrent(), TIME_DATE | TIME_MINUTES) + ",";
+   line += (is_buy ? "BUY" : "SELL") + ",";
+   line += DoubleToString(entry, _Digits) + ",";
+   line += DoubleToString(sl, _Digits) + ",";
+   line += DoubleToString(tp, _Digits) + ",";
+   line += DoubleToString(volume, 2) + ",";
+   line += reason;
+   
+   FileWriteString(file_handle, line + "\n");
+   FileClose(file_handle);
 }
 //+------------------------------------------------------------------+
