@@ -15,7 +15,7 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-// Enhanced system prompt for Consensus-Based Strategy
+// Enhanced system prompt for Consensus-Based Strategy with Trend Detection
 const SYSTEM_PROMPT = `You are an expert Forex analyst using a Consensus-Based Strategy across multiple technical indicators.
 
 Analyze the market data and provide a comprehensive signal based on indicator confluence. Pay special attention to:
@@ -24,6 +24,9 @@ Analyze the market data and provide a comprehensive signal based on indicator co
 2. Bollinger Band Squeezes: Price breaking out of upper/lower bands indicates momentum
 3. Volume Analysis: Low volume reduces confidence - be more cautious with signals
 4. Consensus Requirements: Only high-confidence signals when 4+ indicators agree
+5. TREND DETECTION: If EMA alignment (8>20>50 or 8<20<50) OR MACD crosses zero line, give decisive BUY/SELL EVEN IF RSI is neutral. Trends override momentum.
+
+CRITICAL: If trigger reason contains "Trend" or "MACD Cross", you MUST send BUY or SELL (never NEUTRAL). Strong trends are high-conviction setups.
 
 Ignore any frontend/dashboard reporting. Output only valid JSON for the MT5 -> AI -> Telegram pipeline.
 
@@ -33,8 +36,8 @@ Respond with ONLY valid JSON (no markdown):
   "confidence": 0-100,
   "riskLevel": "LOW"|"MEDIUM"|"HIGH",
   "marketPhase": "ACCUMULATION"|"MARKUP"|"DISTRIBUTION"|"MARKDOWN",
-  "analysis": "Brief 2-3 sentence analysis mentioning RSI levels, Bollinger Band position, and volume impact",
-  "reasoning": "VERY CONCISE: Just the key factors in 5 words max (e.g., 'RSI Oversold + Hammer Pattern')"
+  "analysis": "Brief 2-3 sentence analysis mentioning trigger type and confirmation indicators",
+  "reasoning": "VERY CONCISE: Just the key factors in 5 words max (e.g., 'EMA Aligned + MACD Cross')"
 }`;
 
 interface AnalysisResponse {
@@ -58,6 +61,7 @@ export async function POST(req: Request) {
       ema8: receivedData.ema8,
       hasMACD: !!receivedData.macd,
       hasHistory: !!receivedData.history,
+      triggerReason: receivedData.triggerReason,
     });
 
     const {
@@ -74,7 +78,8 @@ export async function POST(req: Request) {
       accountBalance = 27,
       history = [],
       atr,
-      averageAtr
+      averageAtr,
+      triggerReason = ''
     } = receivedData;
 
     // ========== STEP 2: VALIDATE ==========
@@ -103,7 +108,8 @@ export async function POST(req: Request) {
       accountBalance,
       history,
       atr,
-      averageAtr
+      averageAtr,
+      triggerReason
     });
 
     console.log('[API] POST /api/analyze - INSTANT RESPONSE SENT');
@@ -133,8 +139,9 @@ async function processAnalysisInBackground(data: {
   history: any[];
   atr?: number;
   averageAtr?: number;
+  triggerReason?: string;
 }) {
-  const { symbol, price, ema8, ema20, ema50, macd, upperBB, lowerBB, rsi, vol, accountBalance, history, atr, averageAtr } = data;
+  const { symbol, price, ema8, ema20, ema50, macd, upperBB, lowerBB, rsi, vol, accountBalance, history, atr, averageAtr, triggerReason = '' } = data;
 
   try {
     console.log('[BACKGROUND] Starting Consensus-Based analysis...');
@@ -231,16 +238,16 @@ Consensus: ${consensus.buyIndicators} BUY, ${consensus.sellIndicators} SELL indi
 Confluence Score: ${consensus.confluenceScore}%
 High Confidence: ${consensus.highConfidence}
 Market Phase: ${marketPhase}
+Trigger Reason: ${triggerReason || 'Consensus analysis triggered'}
 
 IMPORTANT:
 - Analyze RSI for divergence (oversold <30, overbought >70)
 - Check for Bollinger Band squeezes/breakouts
 - If volume is low, reduce confidence and be more cautious
 - Only give strong signals when multiple indicators align
+- If trigger contains "Trend" or "MACD Cross", give definitive BUY/SELL even if RSI neutral
 
-CRITICAL: Keep reasoning EXTREMELY CONCISE - maximum 5 words (e.g., 'RSI Oversold + Hammer')
-
-CRITICAL: Keep reasoning EXTREMELY CONCISE - maximum 5 words (e.g., 'RSI Oversold + Hammer')
+CRITICAL: Keep reasoning EXTREMELY CONCISE - maximum 5 words (e.g., 'EMA Aligned + MACD Cross')
 
 Provide comprehensive analysis following consensus-based strategy principles.`;
 

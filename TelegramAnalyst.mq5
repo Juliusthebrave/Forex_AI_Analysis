@@ -17,6 +17,8 @@ int rsi_handle;
 int bb_handle;
 int ema8_handle;
 int ema20_handle;
+int ema50_handle;
+int macd_handle;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -28,9 +30,12 @@ int OnInit()
    bb_handle = iBands(_Symbol, PERIOD_CURRENT, 20, 0, 2, PRICE_CLOSE);
    ema8_handle = iMA(_Symbol, PERIOD_CURRENT, 8, 0, MODE_EMA, PRICE_CLOSE);
    ema20_handle = iMA(_Symbol, PERIOD_CURRENT, 20, 0, MODE_EMA, PRICE_CLOSE);
+   ema50_handle = iMA(_Symbol, PERIOD_CURRENT, 50, 0, MODE_EMA, PRICE_CLOSE);
+   macd_handle = iMACD(_Symbol, PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE);
 
    if(rsi_handle == INVALID_HANDLE || bb_handle == INVALID_HANDLE ||
-      ema8_handle == INVALID_HANDLE || ema20_handle == INVALID_HANDLE)
+      ema8_handle == INVALID_HANDLE || ema20_handle == INVALID_HANDLE ||
+      ema50_handle == INVALID_HANDLE || macd_handle == INVALID_HANDLE)
    {
       Print("Error creating indicators");
       return(INIT_FAILED);
@@ -50,6 +55,8 @@ void OnDeinit(const int reason)
    IndicatorRelease(bb_handle);
    IndicatorRelease(ema8_handle);
    IndicatorRelease(ema20_handle);
+   IndicatorRelease(ema50_handle);
+   IndicatorRelease(macd_handle);
 }
 
 //+------------------------------------------------------------------+
@@ -59,7 +66,9 @@ void OnTick()
 {
    //--- Get current price and indicators
    double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double rsi[1], upperBB[1], lowerBB[1], ema8[1], ema20[1];
+   double rsi[1], upperBB[1], lowerBB[1], ema8[1], ema20[1], ema50[1];
+   double macd_main[1], macd_signal[1], macd_histogram[1];
+   double macd_histogram_prev[1];
 
    //--- Copy indicator values
    if(CopyBuffer(rsi_handle, 0, 0, 1, rsi) != 1) return;
@@ -67,13 +76,16 @@ void OnTick()
    if(CopyBuffer(bb_handle, 2, 0, 1, lowerBB) != 1) return; // Lower band
    if(CopyBuffer(ema8_handle, 0, 0, 1, ema8) != 1) return;
    if(CopyBuffer(ema20_handle, 0, 0, 1, ema20) != 1) return;
+   if(CopyBuffer(ema50_handle, 0, 0, 1, ema50) != 1) return;
+   if(CopyBuffer(macd_handle, 2, 0, 1, macd_histogram) != 1) return; // Histogram
+   if(CopyBuffer(macd_handle, 2, 1, 1, macd_histogram_prev) != 1) return; // Previous histogram
 
    //--- Get previous EMA values for crossover detection
    double ema8_prev[1], ema20_prev[1];
    if(CopyBuffer(ema8_handle, 0, 1, 1, ema8_prev) != 1) return;
    if(CopyBuffer(ema20_handle, 0, 1, 1, ema20_prev) != 1) return;
 
-   //--- SNIPER BOT PRE-FILTERS ---
+   //--- SNIPER BOT WITH TREND DETECTION ---
    bool triggerSignal = false;
    string triggerReason = "";
 
@@ -101,6 +113,37 @@ void OnTick()
       triggerReason = triggerReason == "" ? "EMA Cross" : triggerReason + " + EMA Cross";
    }
 
+   // 4. TREND TRIGGER: EMA Alignment (8 > 20 > 50 for Buy, 8 < 20 < 50 for Sell)
+   bool bullish_alignment = (ema8[0] > ema20[0]) && (ema20[0] > ema50[0]);
+   bool bearish_alignment = (ema8[0] < ema20[0]) && (ema20[0] < ema50[0]);
+
+   if(bullish_alignment || bearish_alignment)
+   {
+      triggerSignal = true;
+      string trend_type = bullish_alignment ? "Bullish" : "Bearish";
+      triggerReason = triggerReason == "" ? "Trend " + trend_type : triggerReason + " + Trend " + trend_type;
+   }
+
+   // 5. MACD ZERO-LINE CROSSOVER
+   bool macd_was_positive = macd_histogram_prev[0] > 0;
+   bool macd_is_positive = macd_histogram[0] > 0;
+   bool macd_was_negative = macd_histogram_prev[0] < 0;
+   bool macd_is_negative = macd_histogram[0] < 0;
+
+   // Bullish cross: MACD goes from negative to positive
+   if(macd_was_negative && macd_is_positive)
+   {
+      triggerSignal = true;
+      triggerReason = triggerReason == "" ? "MACD Bullish Cross" : triggerReason + " + MACD Bullish Cross";
+   }
+
+   // Bearish cross: MACD goes from positive to negative
+   if(macd_was_positive && macd_is_negative)
+   {
+      triggerSignal = true;
+      triggerReason = triggerReason == "" ? "MACD Bearish Cross" : triggerReason + " + MACD Bearish Cross";
+   }
+
    //--- SILENT MODE: If no triggers, just log and exit
    if(!triggerSignal)
    {
@@ -111,13 +154,13 @@ void OnTick()
    //--- TRIGGER DETECTED: Send to Vercel API
    Print("Sniper Trigger: ", triggerReason, " - Sending to AI Analysis");
 
-   SendToVercel(price, rsi[0], upperBB[0], lowerBB[0], ema8[0], ema20[0]);
+   SendToVercel(price, rsi[0], upperBB[0], lowerBB[0], ema8[0], ema20[0], ema50[0], triggerReason);
 }
 
 //+------------------------------------------------------------------+
 //| Send data to Vercel API                                          |
 //+------------------------------------------------------------------+
-void SendToVercel(double price, double rsi, double upperBB, double lowerBB, double ema8, double ema20)
+void SendToVercel(double price, double rsi, double upperBB, double lowerBB, double ema8, double ema20, double ema50, string triggerReason)
 {
    //--- Prepare JSON payload
    string json = "{";
@@ -125,7 +168,7 @@ void SendToVercel(double price, double rsi, double upperBB, double lowerBB, doub
    json += "\"price\":" + DoubleToString(price, 5) + ",";
    json += "\"ema8\":" + DoubleToString(ema8, 5) + ",";
    json += "\"ema20\":" + DoubleToString(ema20, 5) + ",";
-   json += "\"ema50\":" + DoubleToString(iMA(_Symbol, PERIOD_CURRENT, 50, 0, MODE_EMA, PRICE_CLOSE), 5) + ",";
+   json += "\"ema50\":" + DoubleToString(ema50, 5) + ",";
    json += "\"rsi\":" + DoubleToString(rsi, 2) + ",";
    json += "\"upperBB\":" + DoubleToString(upperBB, 5) + ",";
    json += "\"lowerBB\":" + DoubleToString(lowerBB, 5) + ",";
@@ -164,6 +207,9 @@ void SendToVercel(double price, double rsi, double upperBB, double lowerBB, doub
       if(i > 0) json += ",";
    }
    json += "]";
+
+   //--- Add trigger reason for AI context
+   json += ",\"triggerReason\":\"" + triggerReason + "\"";
 
    json += "}";
 

@@ -71,6 +71,14 @@ The bot only activates when **any** of these high-probability conditions are met
 - **Golden Cross**: 8 EMA crosses above 20 EMA
 - **Death Cross**: 8 EMA crosses below 20 EMA
 
+### 4. Trend Alignment (NEW)
+- **Bullish Trend**: EMA 8 > EMA 20 > EMA 50 (smooth uptrend)
+- **Bearish Trend**: EMA 8 < EMA 20 < EMA 50 (smooth downtrend)
+
+### 5. MACD Zero-Line Crossover (NEW)
+- **Bullish Cross**: MACD Histogram crosses from negative to positive
+- **Bearish Cross**: MACD Histogram crosses from positive to negative
+
 ### Silent Mode
 When none of these conditions are met, MT5 prints: `Market Quiet - No Signal` and doesn't send data to the API.
 
@@ -105,6 +113,17 @@ Add these URLs to MT5's allowed WebRequest list:
 ```
 
 Simplified, actionable signals with automatic TP/SL calculation based on ATR and risk level.
+
+## AI Trend Logic
+
+When the sniper triggers on **Trend Alignment** or **MACD Crossover**:
+
+- The AI recognizes trends as high-conviction setups
+- **Strong Bullish Trend** (EMA 8 > 20 > 50) → AI sends **🟢 BUY** even if RSI is neutral (~50)
+- **Strong Bearish Trend** (EMA 8 < 20 < 50) → AI sends **🔴 SELL** even if RSI is neutral (~50)
+- **MACD Zero-Line Cross** confirms momentum shift → High confidence signal
+
+This captures smooth trend moves that don't reach extreme RSI levels, eliminating missed opportunities.
 
 ## Getting Started
 
