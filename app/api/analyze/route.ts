@@ -276,28 +276,33 @@ Provide comprehensive analysis following consensus-based strategy principles.`;
       console.warn('[BACKGROUND] AI failed, using consensus-based analysis:', aiError instanceof Error ? aiError.message : String(aiError));
     }
 
-    // ========== SEND PROFESSIONAL TELEGRAM MESSAGE ==========
-    console.log('[BACKGROUND] Sending Telegram signal...');
-    await sendProfessionalTelegramSignal({
-      symbol,
-      signal: aiResponse.signal,
-      price,
-      analysis: aiResponse.analysis,
-      reasoning: aiResponse.reasoning,
-      confidence: aiResponse.confidence,
-      riskLevel: aiResponse.riskLevel,
-      marketPhase: aiResponse.marketPhase,
-      pattern,
-      volatilityAlert: volatility.alert,
-      confluenceScore: consensus.confluenceScore,
-      indicatorBreakdown: `${consensus.buyIndicators} BUY / ${consensus.sellIndicators} SELL indicators`,
-      rsi,
-      upperBB,
-      lowerBB,
-      atr
-    });
+    // ========== SEND PROFESSIONAL TELEGRAM MESSAGE (ONLY FOR BUY/SELL) ==========
+    // Sniper Bot: Only send Telegram notifications for BUY/SELL signals, never for NEUTRAL
+    if (aiResponse.signal === 'BUY' || aiResponse.signal === 'SELL') {
+      console.log('[BACKGROUND] Sending Telegram signal...');
+      await sendProfessionalTelegramSignal({
+        symbol,
+        signal: aiResponse.signal,
+        price,
+        analysis: aiResponse.analysis,
+        reasoning: aiResponse.reasoning,
+        confidence: aiResponse.confidence,
+        riskLevel: aiResponse.riskLevel,
+        marketPhase: aiResponse.marketPhase,
+        pattern,
+        volatilityAlert: volatility.alert,
+        confluenceScore: consensus.confluenceScore,
+        indicatorBreakdown: `${consensus.buyIndicators} BUY / ${consensus.sellIndicators} SELL indicators`,
+        rsi,
+        upperBB,
+        lowerBB,
+        atr
+      });
 
-    console.log('[BACKGROUND] Analysis complete and sent to Telegram');
+      console.log('[BACKGROUND] Analysis complete and sent to Telegram');
+    } else {
+      console.log('[BACKGROUND] NEUTRAL signal - no Telegram message sent (Sniper Bot mode)');
+    }
 
   } catch (error) {
     console.error('[BACKGROUND] Error in background processing:', error);

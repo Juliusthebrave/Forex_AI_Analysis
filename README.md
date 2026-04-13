@@ -1,11 +1,12 @@
-# Forex AI Analyst - Consensus-Based Strategy
+# Forex AI Analyst - Sniper Bot
 
-A high-speed Forex analysis API that uses a Consensus-Based Strategy across multiple technical indicators. Designed for MT5 integration with instant responses and professional Telegram notifications.
+A high-speed Forex analysis API that uses a Consensus-Based Strategy across multiple technical indicators. Designed for MT5 integration with instant responses and professional Telegram notifications. Now operates as a **Sniper Bot** that only triggers on high-probability setups.
 
 ## Features
 
 - **Instant Response**: Returns `{ status: 'analyzing' }` immediately to MT5
 - **Headless Bot**: No frontend dashboard, MT5 -> AI -> Telegram only
+- **Sniper Mode**: Only triggers on extreme RSI, BB breakouts, or EMA crosses
 - **Background Processing**: AI analysis runs asynchronously for speed
 - **Consensus Analysis**: 6-indicator confluence scoring (EMA, MACD, Patterns, Bollinger Bands, RSI, Volume)
 - **High Confidence Signals**: Only signals when 4+ indicators agree, with volume-based caution
@@ -19,7 +20,7 @@ A high-speed Forex analysis API that uses a Consensus-Based Strategy across mult
 
 ### POST `/api/analyze`
 
-Receives MT5 data and processes it asynchronously.
+Receives MT5 data and processes it asynchronously. **Sniper Bot Mode**: Only sends Telegram notifications for BUY/SELL signals. NEUTRAL signals are logged but don't trigger notifications.
 
 **Request Body:**
 ```json
@@ -54,13 +55,36 @@ Receives MT5 data and processes it asynchronously.
 }
 ```
 
-## Environment Variables
+## Sniper Bot Triggers
 
-```env
-GROQ_API_KEY=your_groq_api_key
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_CHAT_ID=your_telegram_chat_id
-```
+The bot only activates when **any** of these high-probability conditions are met:
+
+### 1. RSI Extreme Zones
+- **Buy Zone**: RSI < 35 (Oversold)
+- **Sell Zone**: RSI > 65 (Overbought)
+
+### 2. Bollinger Band Breakouts
+- **Bullish**: Price breaks above Upper Bollinger Band
+- **Bearish**: Price breaks below Lower Bollinger Band
+
+### 3. EMA Crossover
+- **Golden Cross**: 8 EMA crosses above 20 EMA
+- **Death Cross**: 8 EMA crosses below 20 EMA
+
+### Silent Mode
+When none of these conditions are met, MT5 prints: `Market Quiet - No Signal` and doesn't send data to the API.
+
+## MT5 Setup
+
+1. Copy `TelegramAnalyst.mq5` to your MT5 `Experts` folder
+2. Update the `API_URL` input parameter with your Vercel deployment URL
+3. Enable automated trading and WebRequest access for your domain
+4. Attach the EA to any chart (EURUSD recommended for testing)
+
+### MT5 WebRequest URLs
+Add these URLs to MT5's allowed WebRequest list:
+- `https://your-vercel-app.vercel.app`
+- `https://api.telegram.org`
 
 ## Telegram Message Format
 
