@@ -1,341 +1,189 @@
 import { generateText } from 'ai';
 import { createGroq } from '@ai-sdk/groq';
-import { sendTelegramSignal } from '@/lib/telegram';
-import type { ForexSignalRequest, SignalType } from '@/lib/types';
+import type { SignalType } from '@/lib/types';
 import {
   detectPattern,
   determineMarketPhase,
   calculateVolatilityAlert,
-  identifyLevels,
-  validateTradeConditions,
-  performConsensusAnalysis
 } from '@/lib/pattern-detection';
 
 const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-// TEST MODE: Extremely Aggressive Signal Generation
-const SYSTEM_PROMPT = `🚨 YOU ARE IN TEST MODE - AGGRESSIVE SIGNAL GENERATION 🚨
+// DOW-HOMMA M1 PRICE ACTION SIGNAL GENERATOR with Volatility-Adjusted Exits
+const SYSTEM_PROMPT = `You are an expert M1 scalper using the Dow-Homma method with Volatility-Adjusted exits.
 
-*** CRITICAL OVERRIDE RULES FOR TEST MODE ***
-1. Do NOT return NEUTRAL under any circumstances
-2. Issue BUY or SELL signals based on ANY immediate 1-minute trend, even with LOW confluence
-3. RSI readings at 45/55 are now considered trade triggers (NOT 35/65)
-4. Volume requirements are REMOVED - trade regardless of volume
-5. Ignore traditional risk management - we are testing aggressive execution
-6. Confidence can be 50%+ (normally we'd reject <70%)
-7. Each tick with a price move = potential signal opportunity
+STRUCTURAL ANALYSIS (Dow Theory):
+- Identify trend: Higher Highs/Lows = Bullish, Lower Highs/Lows = Bearish
 
-Decision Logic:
-- If price > any upper indicator or RSI > 55: AGGRESSIVE SELL
-- If price < any lower indicator or RSI < 45: AGGRESSIVE BUY
-- If no direction is clear: Use 1-minute trend momentum (last movement direction)
-- On any confluence: Increase confidence but DO NOT STAY NEUTRAL
+ENTRY LOGIC (Homma Candlesticks):
+- BUY only on Bullish Engulfing or Hammer at a Dow Support (Higher Low)
+- SELL only on Bearish Engulfing or Shooting Star at a Dow Resistance (Lower High)
+- Be extremely picky. Market must be clean (not sideways/choppy)
 
-CRITICAL: You MUST respond with BUY or SELL. NEUTRAL is forbidden in test mode.
+VOLATILITY-ADJUSTED EXIT LOGIC:
+- Stop Loss (SL) distance: 2.0x ATR
+- Take Profit (TP) distance: 4.0x ATR (maintaining 1:2 Risk/Reward ratio)
+- These distances are absolute values (e.g., if ATR=50, SL distance=100 pips, TP distance=200 pips)
 
-Respond with ONLY valid JSON (no markdown):
-{
-  "signal": "BUY"|"SELL",
-  "confidence": 50-100,
-  "riskLevel": "HIGH",
-  "marketPhase": "TEST_MODE",
-  "analysis": "TEST MODE: Aggressive trade signal. Immediate execution recommended.",
-  "reasoning": "TEST_AGGRESSIVE_SIGNAL"
-}`;
+RETURN FORMAT (JSON only):
+{"action": "BUY"|"SELL"|"NEUTRAL", "sl_dist": number, "tp_dist": number, "reason": "string"}
+
+Do not add any extra keys, markdown, or commentary. Only return the valid JSON object.`;
 
 interface AnalysisResponse {
-  signal: 'BUY' | 'SELL' | 'NEUTRAL';
-  confidence: number;
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-  marketPhase: string;
-  analysis: string;
-  reasoning: string;
+  action: 'BUY' | 'SELL' | 'NEUTRAL';
+  sl_dist: number;  // Stop Loss distance (2.0x ATR)
+  tp_dist: number;  // Take Profit distance (4.0x ATR)
+  reason: string;
 }
 
 export async function POST(req: Request) {
   console.log('[API] POST /api/analyze - START');
 
   try {
-    // ========== STEP 1: PARSE REQUEST ==========
     const receivedData = await req.json();
-    console.log('[API] Received data:', {
+    console.log('[API] Received data for Dow-Homma analysis:', {
       symbol: receivedData.symbol,
       price: receivedData.price,
-      ema8: receivedData.ema8,
-      hasMACD: !!receivedData.macd,
-      hasHistory: !!receivedData.history,
-      triggerReason: receivedData.triggerReason,
+      historyLength: Array.isArray(receivedData.history) ? receivedData.history.length : 0,
     });
 
-    const {
-      symbol,
-      price,
-      ema8,
-      ema20,
-      ema50,
-      macd,
-      upperBB,
-      lowerBB,
-      rsi,
-      vol,
-      accountBalance = 27,
-      history = [],
-      atr,
-      averageAtr,
-      triggerReason = ''
-    } = receivedData;
+    const { symbol, price, history = [] } = receivedData;
 
-    // ========== STEP 2: VALIDATE ==========
-    if (!symbol || typeof price !== 'number') {
-      console.warn('[API] Missing required: symbol or price');
-      return Response.json({ status: 'analyzing' });
+    if (!symbol || typeof price !== 'number' || !Array.isArray(history) || history.length < 5) {
+      console.warn('[API] Missing required data or insufficient history');
+      return Response.json({ action: 'NEUTRAL', sl_dist: 0, tp_dist: 0, reason: 'Insufficient price history' });
     }
 
-    // ========== STEP 3: INSTANT RESPONSE TO MT5 ==========
-    // Return immediately to MT5 so it doesn't wait
-    const instantResponse = Response.json({ status: 'analyzing' });
-
-    // ========== STEP 4: HEADLESS BACKGROUND PROCESSING ==========
-    // Process MT5 -> AI -> Telegram only; do not update any web dashboard
-    void processAnalysisInBackground({
-      symbol,
-      price,
-      ema8,
-      ema20,
-      ema50,
-      macd,
-      upperBB,
-      lowerBB,
-      rsi,
-      vol,
-      accountBalance,
-      history,
-      atr,
-      averageAtr,
-      triggerReason
-    });
-
-    console.log('[API] POST /api/analyze - INSTANT RESPONSE SENT');
-    return instantResponse;
-
+    const analysis = await analyzeDowHommaSignal(receivedData);
+    return Response.json(analysis);
   } catch (outerError) {
     const errorMsg = outerError instanceof Error ? outerError.message : String(outerError);
     console.error('[API] ‼️ CRITICAL ERROR:', errorMsg);
-    // Still return instant response even on error
-    return Response.json({ status: 'analyzing' });
+    return Response.json({ action: 'NEUTRAL', reason: 'Unable to perform Dow-Homma analysis' });
   }
 }
 
-// Background processing function
-async function processAnalysisInBackground(data: {
+async function analyzeDowHommaSignal(data: {
   symbol: string;
   price: number;
-  ema8: number;
-  ema20: number;
-  ema50: number;
-  macd: any;
+  ema8?: number;
+  ema20?: number;
+  ema50?: number;
+  macd?: any;
   upperBB?: number;
   lowerBB?: number;
   rsi?: number;
   vol?: number;
-  accountBalance: number;
   history: any[];
   atr?: number;
   averageAtr?: number;
   triggerReason?: string;
-}) {
-  const { symbol, price, ema8, ema20, ema50, macd, upperBB, lowerBB, rsi, vol, accountBalance, history, atr, averageAtr, triggerReason = '' } = data;
+}): Promise<AnalysisResponse> {
+  const { symbol, price, history, triggerReason = '' } = data;
+  const pattern = detectPattern(history);
+  const marketPhase = determineMarketPhase(price, data.ema8 ?? 0, data.ema20 ?? 0, data.ema50 ?? 0);
+  const volatility = calculateVolatilityAlert(history, data.atr || 0, data.averageAtr || 0, price);
+
+  const formattedHistory = history.slice(-10).map((candle: any, index: number) => {
+    return `Candle ${index + 1}: open=${candle.open}, high=${candle.high}, low=${candle.low}, close=${candle.close}, volume=${candle.volume ?? 'N/A'}`;
+  }).join('\n');
+
+  const atrValue = data.atr || 0.0001;
+  const slDistance = atrValue * 2.0;    // 2.0x ATR for Stop Loss
+  const tpDistance = atrValue * 4.0;    // 4.0x ATR for Take Profit (1:2 R/R)
+
+  const userPrompt = `Dow-Homma M1 Scalping with Volatility-Adjusted Exits
+
+Market snapshot:
+Symbol: ${symbol}
+Price: ${price}
+ATR: ${atrValue.toFixed(8)}
+Pattern: ${pattern}
+Market Phase: ${marketPhase}
+Volume: ${data.vol ?? 'N/A'}
+
+For this setup:
+- SL distance should be: ${slDistance.toFixed(8)} (2.0x ATR)
+- TP distance should be: ${tpDistance.toFixed(8)} (4.0x ATR)
+
+Recent candles (most recent first):
+${formattedHistory}
+
+Analyze the Dow structure (Higher Highs/Lows vs Lower Highs/Lows) and Homma triggers (Engulfing/Hammer/Shooting Star).
+Return JSON: {"action": "BUY"|"SELL"|"NEUTRAL", "sl_dist": ${slDistance.toFixed(8)}, "tp_dist": ${tpDistance.toFixed(8)}, "reason": "explanation"}`;
 
   try {
-    console.log('[BACKGROUND] Starting Consensus-Based analysis...');
-
-    // ========== CONSENSUS-BASED ANALYSIS ==========
-    const pattern = detectPattern(history);
-    const marketPhase = determineMarketPhase(price, ema8, ema20, ema50);
-    const volatility = calculateVolatilityAlert(history, atr || 0, averageAtr || 0, price);
-    const levels = identifyLevels(history);
-
-    // Perform consensus analysis across all 6 indicators
-    const consensus = performConsensusAnalysis({
-      price,
-      ema8,
-      ema20,
-      ema50,
-      macdHistogram: macd?.histogram || 0,
-      pattern,
-      upperBB,
-      lowerBB,
-      rsi,
-      vol,
-      history
+    const result = await generateText({
+      model: groq('llama3-8b-8192'),
+      system: SYSTEM_PROMPT,
+      prompt: userPrompt,
+      temperature: 0.2,
     });
 
-    console.log('[BACKGROUND] Consensus result:', {
-      agreeingDirection: consensus.agreeingDirection,
-      confluenceScore: consensus.confluenceScore,
-      highConfidence: consensus.highConfidence,
-      buyIndicators: consensus.buyIndicators,
-      sellIndicators: consensus.sellIndicators
-    });
-
-    // Determine signal based on consensus
-    let signalDirection: 'BUY' | 'SELL' | 'NEUTRAL' = consensus.agreeingDirection;
-
-    // Only give signal if high confidence (4+ indicators agree) OR if it's a strong pattern
-    if (!consensus.highConfidence && signalDirection !== 'NEUTRAL') {
-      // Check if we have a strong Dow-Homma pattern as backup
-      if (pattern === 'HAMMER' || pattern === 'BULLISH_ENGULFING' || pattern === 'FALLING_STAR' || pattern === 'BEARISH_ENGULFING') {
-        console.log('[BACKGROUND] Using strong pattern as backup signal');
-      } else {
-        signalDirection = 'NEUTRAL';
-        console.log('[BACKGROUND] Low confidence - neutralizing signal');
-      }
+    let cleanedText = result.text.trim();
+    if (cleanedText.startsWith('```')) {
+      cleanedText = cleanedText.replace(/```(?:json)?\n?/g, '').trim();
     }
 
-    // Validate trade conditions with contextual analysis
-    const tradeValid = validateTradeConditions({
-      pattern,
-      price,
-      support: levels.support,
-      resistance: levels.resistance,
-      macdHistogram: macd?.histogram || 0,
-      isBullish: signalDirection === 'BUY'
-    });
-
-    // Adjust signal based on validation
-    if (!tradeValid && signalDirection !== 'NEUTRAL') {
-      signalDirection = 'NEUTRAL';
+    const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('AI response did not contain valid JSON');
     }
 
-    // ========== AI ENHANCED ANALYSIS ==========
-    console.log('[BACKGROUND] Calling Groq for enhanced analysis...');
-    let aiResponse: AnalysisResponse = {
-      signal: signalDirection,
-      confidence: consensus.highConfidence ? Math.min(95, consensus.confluenceScore + 20) : Math.max(20, consensus.confluenceScore - 10),
-      riskLevel: volatility.isHigh ? 'HIGH' : consensus.highConfidence ? 'LOW' : 'MEDIUM',
-      marketPhase,
-      analysis: 'Market analysis in progress',
-      reasoning: 'Technical analysis based on consensus indicators'
+    const parsed = JSON.parse(jsonMatch[0]);
+    const action = parsed.action === 'BUY' || parsed.action === 'SELL' ? parsed.action : 'NEUTRAL';
+    const reason = typeof parsed.reason === 'string' && parsed.reason.length > 0
+      ? parsed.reason
+      : action === 'NEUTRAL'
+        ? 'Sideways or incomplete Dow-Homma setup'
+        : 'Dow-Homma setup identified';
+
+    const atrValue = data.atr || 0.0001;
+    const slDist = typeof parsed.sl_dist === 'number' ? parsed.sl_dist : atrValue * 2.0;
+    const tpDist = typeof parsed.tp_dist === 'number' ? parsed.tp_dist : atrValue * 4.0;
+
+    const response: AnalysisResponse = {
+      action,
+      sl_dist: slDist,
+      tp_dist: tpDist,
+      reason: reason.substring(0, 200),
     };
 
-    // Adjust confidence based on volume - low volume reduces confidence
-    if (vol !== undefined && history.length > 0) {
-      const avgVolume = history.reduce((sum, candle) => sum + (candle.volume || 0), 0) / history.length;
-      if (vol < avgVolume * 0.7) {
-        // Low volume - reduce confidence by 15-20 points
-        aiResponse.confidence = Math.max(10, aiResponse.confidence - 20);
-        console.log('[BACKGROUND] Low volume detected - reducing confidence');
-      }
-    }
-
-    try {
-      const userPrompt = `Consensus-Based Analysis for ${symbol}:
-Price: ${price}
-EMAs: 8=${ema8}, 20=${ema20}, 50=${ema50}
-MACD Histogram: ${macd?.histogram ?? 'N/A'}
-Pattern: ${pattern}
-Bollinger Bands: ${upperBB && lowerBB ? `Upper=${upperBB}, Lower=${lowerBB}` : 'N/A'}
-RSI: ${rsi ?? 'N/A'}
-Volume: ${vol ?? 'N/A'}
-Consensus: ${consensus.buyIndicators} BUY, ${consensus.sellIndicators} SELL indicators agree
-Confluence Score: ${consensus.confluenceScore}%
-High Confidence: ${consensus.highConfidence}
-Market Phase: ${marketPhase}
-Trigger Reason: ${triggerReason || 'Consensus analysis triggered'}
-
-IMPORTANT:
-- Analyze RSI for divergence (oversold <30, overbought >70)
-- Check for Bollinger Band squeezes/breakouts
-- If volume is low, reduce confidence and be more cautious
-- Only give strong signals when multiple indicators align
-- If trigger contains "Trend" or "MACD Cross", give definitive BUY/SELL even if RSI neutral
-
-CRITICAL: Keep reasoning EXTREMELY CONCISE - maximum 5 words (e.g., 'EMA Aligned + MACD Cross')
-
-Provide comprehensive analysis following consensus-based strategy principles.`;
-
-      const result = await generateText({
-        model: groq('llama3-8b-8192'),
-        system: SYSTEM_PROMPT,
-        prompt: userPrompt,
-        temperature: 0.3,
-      });
-
-      console.log('[BACKGROUND] Groq response received');
-
-      // Parse AI response
-      let cleanedText = result.text.trim();
-      if (cleanedText.startsWith('```')) {
-        cleanedText = cleanedText.replace(/```(?:json)?\n?/g, '').trim();
-      }
-      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.signal && parsed.confidence !== undefined) {
-          aiResponse = {
-            signal: parsed.signal as SignalType,
-            confidence: Math.min(100, Math.max(0, parsed.confidence)),
-            riskLevel: parsed.riskLevel || aiResponse.riskLevel,
-            marketPhase: parsed.marketPhase || marketPhase,
-            analysis: (parsed.analysis || '').substring(0, 200),
-            reasoning: (parsed.reasoning || '').substring(0, 300)
-          };
-        }
-      }
-    } catch (aiError) {
-      console.warn('[BACKGROUND] AI failed, using consensus-based analysis:', aiError instanceof Error ? aiError.message : String(aiError));
-    }
-
-    // ========== SEND PROFESSIONAL TELEGRAM MESSAGE (ONLY FOR BUY/SELL) ==========
-    // Sniper Bot: Only send Telegram notifications for BUY/SELL signals, never for NEUTRAL
-    if (aiResponse.signal === 'BUY' || aiResponse.signal === 'SELL') {
-      console.log('[BACKGROUND] Sending Telegram signal...');
+    if (action === 'BUY' || action === 'SELL') {
       await sendProfessionalTelegramSignal({
         symbol,
-        signal: aiResponse.signal,
+        signal: action,
         price,
-        analysis: aiResponse.analysis,
-        reasoning: aiResponse.reasoning,
-        confidence: aiResponse.confidence,
-        riskLevel: aiResponse.riskLevel,
-        marketPhase: aiResponse.marketPhase,
+        analysis: reason,
+        reasoning: reason,
+        confidence: 80,
+        riskLevel: 'MEDIUM',
+        marketPhase,
         pattern,
         volatilityAlert: volatility.alert,
-        confluenceScore: consensus.confluenceScore,
-        indicatorBreakdown: `${consensus.buyIndicators} BUY / ${consensus.sellIndicators} SELL indicators`,
-        rsi,
-        upperBB,
-        lowerBB,
-        atr
+        confluenceScore: 0,
+        indicatorBreakdown: 'Dow-Homma analysis',
+        rsi: data.rsi,
+        upperBB: data.upperBB,
+        lowerBB: data.lowerBB,
+        atr: data.atr,
+        slDist: slDist,
+        tpDist: tpDist,
       });
-
-      console.log('[BACKGROUND] Analysis complete and sent to Telegram');
-    } else {
-      console.log('[BACKGROUND] NEUTRAL signal - no Telegram message sent (Sniper Bot mode)');
     }
 
+    return response;
   } catch (error) {
-    console.error('[BACKGROUND] Error in background processing:', error);
-    // Send error notification to Telegram
-    try {
-      await sendTelegramSignal({
-        symbol: data.symbol,
-        signal: 'NEUTRAL' as SignalType,
-        price: data.price,
-        analysis: `Error in analysis: ${error instanceof Error ? error.message : String(error)}`,
-        confidence: 0,
-        riskLevel: 'HIGH',
-      });
-    } catch (telegramError) {
-      console.error('[BACKGROUND] Failed to send error notification:', telegramError);
-    }
+    console.error('[AI] Dow-Homma analysis failed:', error);
+    const defaultAtr = data.atr || 0.0001;
+    return { action: 'NEUTRAL', sl_dist: defaultAtr * 2.0, tp_dist: defaultAtr * 4.0, reason: 'Analysis error' };
   }
 }
 
-// Professional Telegram message formatting
-// Simplified Telegram message formatting
+// Professional Telegram message formatting with Volatility-Adjusted Exits
 async function sendProfessionalTelegramSignal(message: {
   symbol: string;
   signal: SignalType;
@@ -353,6 +201,8 @@ async function sendProfessionalTelegramSignal(message: {
   upperBB?: number;
   lowerBB?: number;
   atr?: number;
+  slDist?: number;
+  tpDist?: number;
 }): Promise<void> {
   const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
   const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -384,20 +234,19 @@ async function sendProfessionalTelegramSignal(message: {
     return;
   }
 
-  // Calculate TP/SL levels using ATR
-  const atr = message.atr || 0.001; // Default ATR if not provided
-  const riskMultiplier = message.riskLevel === 'HIGH' ? 1 : message.riskLevel === 'MEDIUM' ? 1.5 : 2;
-  const rewardMultiplier = 3; // 3:1 reward-to-risk ratio
+  // Calculate TP/SL levels using Volatility-Adjusted distances (2.0x ATR for SL, 4.0x ATR for TP)
+  const slDistance = message.slDist || (message.atr || 0.001) * 2.0;
+  const tpDistance = message.tpDist || (message.atr || 0.001) * 4.0;
 
   let stopLoss: number;
   let takeProfit: number;
 
   if (message.signal === 'BUY') {
-    stopLoss = message.price - (atr * riskMultiplier);
-    takeProfit = message.price + (atr * rewardMultiplier);
+    stopLoss = message.price - slDistance;
+    takeProfit = message.price + tpDistance;
   } else { // SELL
-    stopLoss = message.price + (atr * riskMultiplier);
-    takeProfit = message.price - (atr * rewardMultiplier);
+    stopLoss = message.price + slDistance;
+    takeProfit = message.price - tpDistance;
   }
 
   // Create concise reasoning (max 5 words)
@@ -412,10 +261,10 @@ async function sendProfessionalTelegramSignal(message: {
   const text = `${signalEmoji} ${message.signal} ${message.symbol}
 
 🎯 Entry: ${message.price.toFixed(5)}
-🛑 Stop Loss: ${stopLoss.toFixed(5)}
-💰 Take Profit: ${takeProfit.toFixed(5)}
-
-📊 ${conciseReasoning}`.trim();
+🛑 SL: ${stopLoss.toFixed(5)} (${slDistance.toFixed(5)})
+💰 TP: ${takeProfit.toFixed(5)} (${tpDistance.toFixed(5)})
+📊 R/R: 1:2 | ATR ${message.atr?.toFixed(5) || 'N/A'}
+📝 ${conciseReasoning}`.trim();
 
   try {
     const response = await fetch(
