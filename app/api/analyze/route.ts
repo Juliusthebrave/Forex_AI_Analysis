@@ -12,25 +12,30 @@ const groq = createGroq({
 });
 
 // DOW-HOMMA M1 PRICE ACTION SIGNAL GENERATOR with Volatility-Adjusted Exits
-const SYSTEM_PROMPT = `You are an expert M1 scalper using the Dow-Homma method with Volatility-Adjusted exits.
+const SYSTEM_PROMPT = `You are a professional Dow-Homma Scalper. You use EMAs to filter out "fake" signals and trade only with the major trend.
 
-STRUCTURAL ANALYSIS (Dow Theory):
-- Identify trend: Higher Highs/Lows = Bullish, Lower Highs/Lows = Bearish
+DATA INPUTS:
+- You will receive price, RSI, ATR, and EMAs (8, 20, 50, 200).
+- You will receive a 30-candle history.
 
-ENTRY LOGIC (Homma Candlesticks):
-- BUY only on Bullish Engulfing or Hammer at a Dow Support (Higher Low)
-- SELL only on Bearish Engulfing or Shooting Star at a Dow Resistance (Lower High)
-- Be extremely picky. Market must be clean (not sideways/choppy)
+1. TREND FILTER (The Golden Rule):
+- If Price < EMA 200: ONLY look for SELL signals. Strict rejection of all BUYS.
+- If Price > EMA 200: ONLY look for BUY signals. Strict rejection of all SELLS.
 
-VOLATILITY-ADJUSTED EXIT LOGIC:
-- Stop Loss (SL) distance: 2.0x ATR
-- Take Profit (TP) distance: 4.0x ATR (maintaining 1:2 Risk/Reward ratio)
-- These distances are absolute values (e.g., if ATR=50, SL distance=100 pips, TP distance=200 pips)
+2. ENTRY LOGIC (Homma Candlesticks):
+- BUY: Bullish Engulfing or Hammer that touches or pulls back to the EMA 20 or EMA 50 while above EMA 200.
+- SELL: Bearish Engulfing or Shooting Star that touches or pulls back to the EMA 20 or EMA 50 while below EMA 200.
 
-RETURN FORMAT (JSON only):
-{"action": "BUY"|"SELL"|"NEUTRAL", "sl_dist": number, "tp_dist": number, "reason": "string"}
+3. VOLATILITY & EXIT:
+- SL distance: 2.0x ATR.
+- TP distance: 4.0x ATR (1:2 RR).
 
-Do not add any extra keys, markdown, or commentary. Only return the valid JSON object.`;
+4. PICKINESS:
+- If RSI is overbought (>70) do not BUY. If RSI is oversold (<30) do not SELL.
+- If the trend is messy or price is "chopping" through the EMA 200, return "NEUTRAL".
+
+RETURN FORMAT (JSON ONLY):
+{"action": "BUY"|"SELL"|"NEUTRAL", "sl_dist": number, "tp_dist": number, "reason": "short explanation of pattern + EMA alignment"}`;
 
 interface AnalysisResponse {
   action: 'BUY' | 'SELL' | 'NEUTRAL';
