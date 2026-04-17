@@ -3,26 +3,25 @@ import { createGroq } from '@ai-sdk/groq';
 
 const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
 
-const SYSTEM_PROMPT = `You are a Universal Multi-Asset Scalper. You adapt your logic based on the Symbol provided.
+const SYSTEM_PROMPT = `You are an expert Multi-Asset Scalper (Gold & Forex).
+Your goal is 100% trend alignment using EMA Stacking.
 
-STRATEGY: DOW-HOMMA + EMA STACKING
-- Yellow: EMA 8 | Red: EMA 20 | Blue: EMA 50
+INDICATOR COLORS:
+- Yellow: EMA 8 (Momentum)
+- Red: EMA 20 (Trend)
+- Blue: EMA 50 (Baseline)
 
-1. ASSET ADAPTATION:
-   - XAUUSD (Gold): Highly volatile. Respects RSI 75/25 extremes. Expect larger ATR.
-   - EURUSD/Forex: High liquidity, smaller moves. Respects EMA 20 (Red) pullbacks strictly.
-   - Others: Follow the EMA stack (Yellow > Red > Blue = Uptrend).
+STRATEGY RULES:
+1. BULLISH: Yellow > Red > Blue. Only BUY pullbacks to Red/Blue.
+2. BEARISH: Yellow < Red < Blue. Only SELL pullbacks to Red/Blue.
+3. RSI FILTER: No BUYS if RSI > 70. No SELLS if RSI < 30.
+4. VOLATILITY: Use 2.0x ATR for Stop Loss (SL) and 4.0x ATR for Take Profit (TP).
 
-2. THE TREND RULE:
-   - BUY ONLY if Price > Blue EMA AND Yellow > Red.
-   - SELL ONLY if Price < Blue EMA AND Yellow < Red.
-   - If Price is sandwiching between EMAs, return NEUTRAL.
+ASSET HANDLER:
+- XAUUSD: Use 2 decimal points. Highly volatile.
+- EURUSD/Forex: Use 5 decimal points. Small pips.
 
-3. EXIT LOGIC:
-   - Always maintain 1:2 Risk/Reward.
-   - Use 2.0x ATR for SL and 4.0x ATR for TP.
-
-RETURN ONLY JSON:
+Return ONLY JSON:
 {"action": "BUY"|"SELL"|"NEUTRAL", "sl_dist": number, "tp_dist": number, "reason": "string"}`;
 
 export async function POST(req: Request) {
@@ -30,28 +29,26 @@ export async function POST(req: Request) {
     const data = await req.json();
     const { symbol, price, history = [] } = data;
 
-    // Detect if we are dealing with Forex (5 decimals) or Gold/Crypto
+    // 1. Identify Market Type to handle decimal precision
     const isForex = symbol.includes("USD") && !symbol.includes("XAU");
-    const pipFormat = isForex ? "0.00001" : "0.01";
+    const precision = isForex ? 5 : 2;
 
     const ema8 = data.ema8 || 0;
     const ema20 = data.ema20 || 0;
     const ema50 = data.ema50 || 0;
     const rsi = data.rsi || 50;
-    const atr = data.atr || (isForex ? 0.00015 : 1.5);
+    const atr = data.atr || (isForex ? 0.0001 : 1.5);
 
+    // 2. Clear Data Injection for AI
     const userPrompt = `
-    SYMBOL: ${symbol}
-    PRICE: ${price} (Format: ${pipFormat})
+    ASSET: ${symbol} | Price: ${price}
     ---
-    EMAs: Yellow(8): ${ema8}, Red(20): ${ema20}, Blue(50): ${ema50}
+    EMAs: Yellow: ${ema8}, Red: ${ema20}, Blue: ${ema50}
     RSI: ${rsi} | ATR: ${atr}
     ---
-    TASK: 
-    1. Determine if the EMA Stack is Bullish, Bearish, or Choppy.
-    2. Check for a Homma Candle (Engulfing/Hammer/Star) at the Red line.
-    3. Ensure RSI isn't over-extended.
-    4. Provide SL/TP distances based on 2x and 4x ATR.`;
+    Analyze if current Price Action matches the EMA Stack. 
+    If Symbol is EURUSD, ensure sl_dist/tp_dist are in forex pips (e.g. 0.00150).
+    If Symbol is XAUUSD, ensure sl_dist/tp_dist are in points (e.g. 2.50).`;
 
     const result = await generateText({
       model: groq('llama-3.1-8b-instant'),
@@ -62,29 +59,43 @@ export async function POST(req: Request) {
 
     const parsed = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || '{"action":"NEUTRAL"}');
 
-    // Ensure distances are never 0
-    const finalSl = parsed.sl_dist || (atr * 2);
-    const finalTp = parsed.tp_dist || (atr * 4);
+    // 3. Fallback Math for distances
+    const slDist = parsed.sl_dist || (atr * 2);
+    const tpDist = parsed.tp_dist || (atr * 4);
 
     if (parsed.action !== 'NEUTRAL') {
-      await sendTelegram(symbol, parsed.action, price, parsed.reason, rsi, finalSl, finalTp);
+      await sendProfessionalSignal({
+        symbol,
+        action: parsed.action,
+        price,
+        reason: parsed.reason,
+        rsi,
+        atr,
+        sl: slDist,
+        tp: tpDist,
+        precision
+      });
     }
 
-    return Response.json({
-      action: parsed.action,
-      sl_dist: finalSl,
-      tp_dist: finalTp,
-      reason: parsed.reason
-    });
+    return Response.json({ action: parsed.action, sl_dist: slDist, tp_dist: tpDist, reason: parsed.reason });
 
   } catch (error) {
     return Response.json({ action: 'NEUTRAL', reason: 'System error' });
   }
 }
 
-async function sendTelegram(symbol: string, action: string, price: number, reason: string, rsi: number, sl: number, tp: number) {
-  const emoji = action === "BUY" ? "🚀" : "📉";
-  const text = `${emoji} **${action} ${symbol}**\n💰 Price: ${price}\n🔥 RSI: ${rsi.toFixed(1)}\n🛡️ SL Dist: ${sl.toFixed(5)}\n🎯 TP Dist: ${tp.toFixed(5)}\n📝 ${reason}`;
+// 4. THE PROFESSIONAL DESIGN (Matches your uploaded screenshots)
+async function sendProfessionalSignal(d: any) {
+  const emoji = d.action === 'BUY' ? '🟢' : '🔴';
+  const slPrice = d.action === 'BUY' ? d.price - d.sl : d.price + d.sl;
+  const tpPrice = d.action === 'BUY' ? d.price + d.tp : d.price - d.tp;
+
+  const text = `${emoji} **${d.action} ${d.symbol}**\n\n` +
+               `🎯 **Entry:** ${d.price.toFixed(d.precision)}\n` +
+               `🛑 **SL:** ${slPrice.toFixed(d.precision)} (${d.sl.toFixed(d.precision)})\n` +
+               `💰 **TP:** ${tpPrice.toFixed(d.precision)} (${d.tp.toFixed(d.precision)})\n` +
+               `📊 **R/R: 1:2 | ATR:** ${d.atr.toFixed(d.precision)}\n` +
+               `📝 ${d.reason}`;
   
   await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
