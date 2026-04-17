@@ -117,7 +117,7 @@ Return JSON: {"action": "BUY"|"SELL"|"NEUTRAL", "sl_dist": ${slDistance.toFixed(
 
   try {
     const result = await generateText({
-      model: groq('llama3-8b-8192'),
+      model: groq('llama-3.3-70b-versatile'),
       system: SYSTEM_PROMPT,
       prompt: userPrompt,
       temperature: 0.2,
