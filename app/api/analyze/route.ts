@@ -11,6 +11,7 @@ INDICATOR COLORS:
 - Red: EMA 20 (Trend)
 - Blue: EMA 50 (Baseline)
 
+
 STRATEGY RULES:
 1. BULLISH: Yellow > Red > Blue. Only BUY pullbacks to Red/Blue.
 2. BEARISH: Yellow < Red < Blue. Only SELL pullbacks to Red/Blue.
@@ -40,15 +41,20 @@ export async function POST(req: Request) {
     const atr = data.atr || (isForex ? 0.0001 : 1.5);
 
     // 2. Clear Data Injection for AI
+    // Replace your current userPrompt with this:
     const userPrompt = `
     ASSET: ${symbol} | Price: ${price}
     ---
-    EMAs: Yellow: ${ema8}, Red: ${ema20}, Blue: ${ema50}
+    EMA 8 (Yellow): ${ema8}
+    EMA 20 (Red): ${ema20}
+    EMA 50 (Blue): ${ema50}
+    EMA 200 (Trend): ${data.ema200}  <-- ADD THIS LINE
     RSI: ${rsi} | ATR: ${atr}
     ---
-    Analyze if current Price Action matches the EMA Stack. 
-    If Symbol is EURUSD, ensure sl_dist/tp_dist are in forex pips (e.g. 0.00150).
-    If Symbol is XAUUSD, ensure sl_dist/tp_dist are in points (e.g. 2.50).`;
+    STRICT TREND RULE: 
+    If Price (${price}) is BELOW EMA 200 (${data.ema200}), you are in a CRASH. 
+    Do NOT issue BUY signals. Only look for SELL opportunities.
+    `;
 
     const result = await generateText({
       model: groq('llama-3.1-8b-instant'),
