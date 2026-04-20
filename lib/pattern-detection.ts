@@ -1,9 +1,17 @@
-import type { OHLC, PatternType, MarketPhase } from './types';
-
 /**
- * Detects candle patterns using Dow-Homma method for Forex trading
- * Patterns: Hammer, Bullish Engulfing, Falling Star, Bearish Engulfing, Doji
+ * TYPES & INTERFACES
+ * Consistently used across the AI system
  */
+export type PatternType = 'HAMMER' | 'FALLING_STAR' | 'BULLISH_ENGULFING' | 'BEARISH_ENGULFING' | 'DOJI' | 'NONE';
+export type MarketPhase = 'ACCUMULATION' | 'MARKUP' | 'DISTRIBUTION' | 'MARKDOWN' | 'CONSOLIDATION';
+
+export interface OHLC {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  vol?: number; // Volume is critical for M5 validation
+}
 
 interface CandleMetrics {
   body: number;
@@ -13,6 +21,9 @@ interface CandleMetrics {
   bodyPercent: number;
 }
 
+/**
+ * HELPER: Basic Candle Math
+ */
 function calculateCandleMetrics(candle: OHLC): CandleMetrics {
   const body = Math.abs(candle.close - candle.open);
   const range = candle.high - candle.low;
@@ -24,459 +35,119 @@ function calculateCandleMetrics(candle: OHLC): CandleMetrics {
 }
 
 /**
- * Detects Hammer (Tonkachi) pattern - Bullish
- * Characteristics: Small body at top, long lower wick (2x+ body), small upper wick
+ * PATTERN DETECTORS (Optimized for M5)
  */
 export function isHammer(candle: OHLC): boolean {
-  const metrics = calculateCandleMetrics(candle);
+  const m = calculateCandleMetrics(candle);
   const isBullish = candle.close > candle.open;
-
-  // Small body, long lower wick at least 2x the body, minimal upper wick
-  return (
-    isBullish &&
-    metrics.body > 0 &&
-    metrics.lowerWick >= metrics.body * 2 &&
-    metrics.upperWick <= metrics.body * 0.5 &&
-    metrics.range > 0
-  );
+  // M5 Requirement: Lower wick must be 2.5x body to show strong rejection
+  return isBullish && m.body > 0 && m.lowerWick >= m.body * 2.5 && m.upperWick <= m.body * 0.5;
 }
 
-/**
- * Detects Bullish Engulfing (Sutsumi) pattern
- * Current candle's body must completely engulf the previous candle's body
- */
-export function isBullishEngulfing(current: OHLC, previous: OHLC): boolean {
-  const currentMetrics = calculateCandleMetrics(current);
-  const previousMetrics = calculateCandleMetrics(previous);
-
-  const isBullish = current.close > current.open;
-  const isPreviousBearish = previous.close < previous.open;
-
-  // Current open must be lower than previous close, current close must be higher than previous open
-  const engulfsPrevious =
-    current.open < previous.close &&
-    current.close > previous.open;
-
-  return (
-    isBullish &&
-    isPreviousBearish &&
-    engulfsPrevious &&
-    currentMetrics.body > previousMetrics.body
-  );
-}
-
-/**
- * Detects Falling Star (Nagareboshi) pattern - Bearish
- * Characteristics: Small body at bottom, long upper wick (2x+ body), small lower wick
- */
 export function isFallingStar(candle: OHLC): boolean {
-  const metrics = calculateCandleMetrics(candle);
+  const m = calculateCandleMetrics(candle);
   const isBearish = candle.close < candle.open;
-
-  // Small body, long upper wick at least 2x the body, minimal lower wick
-  return (
-    isBearish &&
-    metrics.body > 0 &&
-    metrics.upperWick >= metrics.body * 2 &&
-    metrics.lowerWick <= metrics.body * 0.5 &&
-    metrics.range > 0
-  );
+  return isBearish && m.body > 0 && m.upperWick >= m.body * 2.5 && m.lowerWick <= m.body * 0.5;
 }
 
-/**
- * Detects Bearish Engulfing (Sutsumi) pattern
- * Current candle's body must completely engulf the previous candle's body
- */
-export function isBearishEngulfing(current: OHLC, previous: OHLC): boolean {
-  const currentMetrics = calculateCandleMetrics(current);
-  const previousMetrics = calculateCandleMetrics(previous);
-
-  const isBearish = current.close < current.open;
-  const isPreviousBullish = previous.close > previous.open;
-
-  // Current open must be higher than previous close, current close must be lower than previous open
-  const engulfsPrevious =
-    current.open > previous.close &&
-    current.close < previous.open;
-
-  return (
-    isBearish &&
-    isPreviousBullish &&
-    engulfsPrevious &&
-    currentMetrics.body > previousMetrics.body
-  );
+export function isBullishEngulfing(curr: OHLC, prev: OHLC): boolean {
+  const isBullish = curr.close > curr.open;
+  const isPrevBearish = prev.close < prev.open;
+  const engulfs = curr.open <= prev.close && curr.close > prev.open;
+  return isBullish && isPrevBearish && engulfs;
 }
 
-/**
- * Detects Doji pattern - Sign of exhaustion (neutral)
- * Characteristics: Very small body with roughly equal upper and lower wicks
- */
+export function isBearishEngulfing(curr: OHLC, prev: OHLC): boolean {
+  const isBearish = curr.close < curr.open;
+  const isPrevBullish = prev.close > prev.open;
+  const engulfs = curr.open >= prev.close && curr.close < prev.open;
+  return isBearish && isPrevBullish && engulfs;
+}
+
 export function isDoji(candle: OHLC): boolean {
-  const metrics = calculateCandleMetrics(candle);
-
-  // Body should be less than 5% of the range (very small)
-  const isSmallBody = metrics.bodyPercent < 5;
-
-  // Wicks should be roughly balanced (within 30% difference)
-  const wickDifference = Math.abs(metrics.upperWick - metrics.lowerWick);
-  const maxWick = Math.max(metrics.upperWick, metrics.lowerWick);
-  const isBalanced = maxWick > 0 && (wickDifference / maxWick) < 0.3;
-
-  return isSmallBody && isBalanced && metrics.range > 0;
+  const m = calculateCandleMetrics(candle);
+  return m.bodyPercent < 10 && m.range > 0;
 }
 
 /**
- * Main pattern detection function
- * Returns the pattern detected in the last candle (most recent)
+ * MAIN PATTERN DETECTION ENGINE
  */
 export function detectPattern(history: OHLC[]): PatternType {
-  if (!history || history.length === 0) return 'NONE';
+  if (!history || history.length < 2) return 'NONE';
+  const last = history[history.length - 1];
+  const prev = history[history.length - 2];
 
-  const lastCandle = history[history.length - 1];
-
-  // Check single-candle patterns first
-  if (isHammer(lastCandle)) return 'HAMMER';
-  if (isFallingStar(lastCandle)) return 'FALLING_STAR';
-  if (isDoji(lastCandle)) return 'DOJI';
-
-  // Check multi-candle patterns (need at least 2 candles)
-  if (history.length >= 2) {
-    const previousCandle = history[history.length - 2];
-    if (isBullishEngulfing(lastCandle, previousCandle))
-      return 'BULLISH_ENGULFING';
-    if (isBearishEngulfing(lastCandle, previousCandle))
-      return 'BEARISH_ENGULFING';
-  }
+  if (isHammer(last)) return 'HAMMER';
+  if (isFallingStar(last)) return 'FALLING_STAR';
+  if (isDoji(last)) return 'DOJI';
+  if (isBullishEngulfing(last, prev)) return 'BULLISH_ENGULFING';
+  if (isBearishEngulfing(last, prev)) return 'BEARISH_ENGULFING';
 
   return 'NONE';
 }
 
 /**
- * Determines if a pattern is bullish
+ * MARKET PHASE LOGIC
+ * Helps the AI understand if we are in a 'Markup' (Buy) or 'Markdown' (Sell)
  */
-export function isBullishPattern(pattern: PatternType): boolean {
-  return pattern === 'HAMMER' || pattern === 'BULLISH_ENGULFING';
+export function determineMarketPhase(price: number, ema8: number, ema20: number, ema50: number): MarketPhase {
+  const bullishStack = ema8 > ema20 && ema20 > ema50;
+  const bearishStack = ema8 < ema20 && ema20 < ema50;
+
+  if (bullishStack && price > ema8) return 'MARKUP';
+  if (bearishStack && price < ema8) return 'MARKDOWN';
+  if (price > ema50 && price < ema20) return 'DISTRIBUTION';
+  if (price < ema50 && price > ema20) return 'ACCUMULATION';
+  return 'CONSOLIDATION';
 }
 
 /**
- * Determines if a pattern is bearish
+ * VOLUME CONFIRMATION (M5 Specialty)
+ * Prevents entries during low-liquidity 'Fake-outs'
  */
-export function isBearishPattern(pattern: PatternType): boolean {
-  return pattern === 'FALLING_STAR' || pattern === 'BEARISH_ENGULFING';
+export function analyzeVolumeConfirmation(currentVol: number, history: OHLC[]): 'BUY' | 'SELL' | 'NEUTRAL' {
+  if (!currentVol || history.length < 5) return 'NEUTRAL';
+  
+  const previousVolumes = history.slice(-6, -1).map(c => c.vol || 0);
+  const avgVol = previousVolumes.reduce((a, b) => a + b, 0) / previousVolumes.length;
+
+  // Signal is valid only if current volume is 20% higher than recent average
+  return currentVol > avgVol * 1.2 ? 'BUY' : 'NEUTRAL';
 }
 
 /**
- * Consensus-Based Indicator Analysis
- * Evaluates 6 indicators for BUY/SELL consensus
+ * SUPPORT & RESISTANCE
  */
-export interface ConsensusResult {
-  buyIndicators: number;
-  sellIndicators: number;
-  totalIndicators: number;
-  confluenceScore: number; // percentage of indicators agreeing
-  highConfidence: boolean; // true if 4+ indicators agree
-  agreeingDirection: 'BUY' | 'SELL' | 'NEUTRAL';
-  indicatorDetails: {
-    emaAlignment: 'BUY' | 'SELL' | 'NEUTRAL';
-    macdSignal: 'BUY' | 'SELL' | 'NEUTRAL';
-    patternSignal: 'BUY' | 'SELL' | 'NEUTRAL';
-    bollingerBands: 'BUY' | 'SELL' | 'NEUTRAL';
-    rsiDivergence: 'BUY' | 'SELL' | 'NEUTRAL';
-    volumeConfirmation: 'BUY' | 'SELL' | 'NEUTRAL';
-  };
-}
-
-/**
- * Performs consensus analysis across all 6 indicators
- */
-export function performConsensusAnalysis(params: {
-  price: number;
-  ema8: number;
-  ema20: number;
-  ema50: number;
-  macdHistogram: number;
-  pattern: PatternType;
-  upperBB?: number;
-  lowerBB?: number;
-  rsi?: number;
-  vol?: number;
-  history?: OHLC[];
-}): ConsensusResult {
-  const {
-    price,
-    ema8,
-    ema20,
-    ema50,
-    macdHistogram,
-    pattern,
-    upperBB,
-    lowerBB,
-    rsi,
-    vol,
-    history = []
-  } = params;
-
-  const indicatorDetails = {
-    emaAlignment: analyzeEMAAlignment(price, ema8, ema20, ema50),
-    macdSignal: analyzeMACDSignal(macdHistogram),
-    patternSignal: analyzePatternSignal(pattern),
-    bollingerBands: analyzeBollingerBands(price, upperBB, lowerBB),
-    rsiDivergence: analyzeRSIDivergence(rsi, history),
-    volumeConfirmation: analyzeVolumeConfirmation(vol, history)
-  };
-
-  // Count agreements
-  const buyCount = Object.values(indicatorDetails).filter(signal => signal === 'BUY').length;
-  const sellCount = Object.values(indicatorDetails).filter(signal => signal === 'SELL').length;
-
-  let agreeingDirection: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
-  let confluenceScore = 0;
-
-  if (buyCount > sellCount) {
-    agreeingDirection = 'BUY';
-    confluenceScore = (buyCount / 6) * 100;
-  } else if (sellCount > buyCount) {
-    agreeingDirection = 'SELL';
-    confluenceScore = (sellCount / 6) * 100;
-  }
-
-  const highConfidence = Math.max(buyCount, sellCount) >= 4;
-
-  return {
-    buyIndicators: buyCount,
-    sellIndicators: sellCount,
-    totalIndicators: 6,
-    confluenceScore: Math.round(confluenceScore),
-    highConfidence,
-    agreeingDirection,
-    indicatorDetails
-  };
-}
-
-/**
- * Analyzes EMA alignment for trend direction
- */
-function analyzeEMAAlignment(price: number, ema8: number, ema20: number, ema50: number): 'BUY' | 'SELL' | 'NEUTRAL' {
-  // Bullish: price > ema8 > ema20 > ema50
-  const bullish = price > ema8 && ema8 > ema20 && ema20 > ema50;
-  // Bearish: price < ema8 < ema20 < ema50
-  const bearish = price < ema8 && ema8 < ema20 && ema20 < ema50;
-
-  if (bullish) return 'BUY';
-  if (bearish) return 'SELL';
-  return 'NEUTRAL';
-}
-
-/**
- * Analyzes MACD histogram for momentum
- */
-function analyzeMACDSignal(histogram: number): 'BUY' | 'SELL' | 'NEUTRAL' {
-  if (histogram > 0.0001) return 'BUY'; // Positive momentum
-  if (histogram < -0.0001) return 'SELL'; // Negative momentum
-  return 'NEUTRAL';
-}
-
-/**
- * Analyzes Dow-Homma pattern for direction
- */
-function analyzePatternSignal(pattern: PatternType): 'BUY' | 'SELL' | 'NEUTRAL' {
-  if (isBullishPattern(pattern)) return 'BUY';
-  if (isBearishPattern(pattern)) return 'SELL';
-  return 'NEUTRAL';
-}
-
-/**
- * Analyzes Bollinger Bands for overextension (volatility)
- */
-function analyzeBollingerBands(price: number, upperBB?: number, lowerBB?: number): 'BUY' | 'SELL' | 'NEUTRAL' {
-  if (!upperBB || !lowerBB) return 'NEUTRAL';
-
-  // Price below lower band = oversold (potential BUY)
-  if (price < lowerBB) return 'BUY';
-  // Price above upper band = overbought (potential SELL)
-  if (price > upperBB) return 'SELL';
-
-  return 'NEUTRAL';
-}
-
-/**
- * Analyzes RSI for divergence signals
- */
-function analyzeRSIDivergence(rsi?: number, history?: OHLC[]): 'BUY' | 'SELL' | 'NEUTRAL' {
-  if (!rsi || !history || history.length < 3) return 'NEUTRAL';
-
-  // Simple RSI analysis: oversold (<30) = potential BUY, overbought (>70) = potential SELL
-  if (rsi < 30) return 'BUY';
-  if (rsi > 70) return 'SELL';
-
-  return 'NEUTRAL';
-}
-
-/**
- * Analyzes volume for confirmation
- */
-function analyzeVolumeConfirmation(currentVolume?: number, history?: OHLC[]): 'BUY' | 'SELL' | 'NEUTRAL' {
-  if (!currentVolume || !history || history.length < 2) return 'NEUTRAL';
-
-  // Calculate average volume of previous candles
-  const previousVolumes = history.slice(0, -1).map(c => c.volume || 0).filter(v => v > 0);
-  if (previousVolumes.length === 0) return 'NEUTRAL';
-
-  const avgVolume = previousVolumes.reduce((sum, vol) => sum + vol, 0) / previousVolumes.length;
-
-  // Volume increasing (above average) = confirmation
-  if (currentVolume > avgVolume * 1.2) return 'BUY'; // Simplified - in real trading this would depend on direction
-
-  return 'NEUTRAL';
-}
-
-/**
- * Determines market phase based on EMA alignment and price action
- * Accumulation: Price below 50/20 EMA, consolidating
- * Markup: Price above all EMAs in bullish order (8>20>50)
- * Distribution: Price above 50 EMA but below 20, showing weakness
- * Markdown: Price below all EMAs in bearish order (8<20<50)
- */
-export function determineMarketPhase(
-  price: number,
-  ema8: number,
-  ema20: number,
-  ema50: number
-): MarketPhase {
-  // Bullish alignment: 8 > 20 > 50
-  const bullishAlign = ema8 > ema20 && ema20 > ema50;
-  // Bearish alignment: 8 < 20 < 50
-  const bearishAlign = ema8 < ema20 && ema20 < ema50;
-  
-  const priceAbove50 = price > ema50;
-  const priceBetween20And50 = price > ema20 && price < ema50;
-  const priceAbove20 = price > ema20;
-  const priceBelow50 = price < ema50;
-  
-  // MARKUP: Strong bullish trend, price above all EMAs
-  if (bullishAlign && price > ema8 && price > ema20 && price > ema50) {
-    return 'MARKUP';
-  }
-  
-  // MARKDOWN: Strong bearish trend, price below all EMAs
-  if (bearishAlign && price < ema8 && price < ema20 && price < ema50) {
-    return 'MARKDOWN';
-  }
-  
-  // DISTRIBUTION: Price retreating from highs, between 20 and 50 EMAs
-  if (priceBetween20And50 && !bullishAlign) {
-    return 'DISTRIBUTION';
-  }
-  
-  // ACCUMULATION: Price consolidating below 20 EMA
-  if (priceBelow50 && price < ema20) {
-    return 'ACCUMULATION';
-  }
-  
-  // Default to the stronger trend signal
-  return bullishAlign ? 'MARKUP' : 'MARKDOWN';
-}
-
-/**
- * Calculates volatility alerts
- * Returns alert message if volatility is abnormally high
- */
-export function calculateVolatilityAlert(
-  history: OHLC[],
-  currentAtr: number,
-  averageAtr: number,
-  price: number
-): { alert: string; isHigh: boolean; slMultiplier: number } {
-  if (!history || history.length === 0) {
-    return { alert: '', isHigh: false, slMultiplier: 1 };
-  }
-  
-  const currentCandle = history[history.length - 1];
-  const currentRange = currentCandle.high - currentCandle.low;
-  
-  // Calculate average range of previous 4 candles
-  let sumRange = 0;
-  for (const candle of history) {
-    sumRange += candle.high - candle.low;
-  }
-  const avgRange = sumRange / history.length;
-  
-  // Check if current ATR is 2x higher than average
-  const atrAlert = currentAtr > averageAtr * 2;
-  
-  // Check if current candle range is 3x larger than average of previous candles
-  const rangeAlert = currentRange > avgRange * 3;
-  
-  let alert = '';
-  let slMultiplier = 1;
-  let isHigh = false;
-  
-  if (atrAlert) {
-    alert = 'ℹ️ Wait for Stabilization - ATR spike detected';
-    isHigh = true;
-    slMultiplier = 1.5;
-  }
-  
-  if (rangeAlert) {
-    alert = '⚠️ VOLATILE: High Risk - Current candle range 3x larger than average';
-    isHigh = true;
-    slMultiplier = 2; // Increase SL distance to avoid being stopped by noise
-  }
-  
-  if (atrAlert && rangeAlert) {
-    alert = '⚠️ EXTREME VOLATILITY: High Risk - Wait for market stabilization';
-    isHigh = true;
-    slMultiplier = 2.5;
-  }
-  
-  return { alert, isHigh, slMultiplier };
-}
-
-/**
- * Determines support/resistance levels from recent candles
- * Support: previous low becomes support
- * Resistance: previous high becomes resistance
- */
-export function identifyLevels(
-  history: OHLC[]
-): { support: number; resistance: number } {
-  if (!history || history.length < 2) {
-    return { support: 0, resistance: 0 };
-  }
-  
-  // Resistance is the highest high of previous candles
-  let resistance = Math.max(...history.slice(0, -1).map(c => c.high));
-  
-  // Support is the lowest low of previous candles
-  let support = Math.min(...history.slice(0, -1).map(c => c.low));
-  
+export function identifyLevels(history: OHLC[]): { support: number; resistance: number } {
+  if (!history || history.length < 10) return { support: 0, resistance: 0 };
+  const resistance = Math.max(...history.map(c => c.high));
+  const support = Math.min(...history.map(c => c.low));
   return { support, resistance };
 }
 
 /**
- * Validates trade conditions per Dow-Homma method
+ * CONSENSUS ANALYSIS
+ * Merges all indicators into one confidence score
  */
-export function validateTradeConditions(params: {
-  pattern: PatternType;
-  price: number;
-  support: number;
-  resistance: number;
-  macdHistogram: number;
-  isBullish: boolean;
-}): boolean {
-  const { pattern, price, support, resistance, macdHistogram, isBullish } = params;
-  
-  if (pattern === 'NONE') return false;
-  
-  if (isBullish) {
-    // BUY: Bullish pattern + at/near support + MACD histogram increasing
-    const nearSupport = price <= support * 1.01; // Within 1% of support
-    const macdBullish = macdHistogram > 0;
-    return isBullishPattern(pattern) && nearSupport && macdBullish;
-  } else {
-    // SELL: Bearish pattern + at/near resistance + MACD histogram negative/decreasing
-    const nearResistance = price >= resistance * 0.99; // Within 1% of resistance
-    const macdBearish = macdHistogram < 0;
-    return isBearishPattern(pattern) && nearResistance && macdBearish;
-  }
+export function performConsensusAnalysis(params: {
+  price: number, ema8: number, ema20: number, ema50: number,
+  rsi: number, vol: number, history: OHLC[]
+}) {
+  const pattern = detectPattern(params.history);
+  const phase = determineMarketPhase(params.price, params.ema8, params.ema20, params.ema50);
+  const volSignal = analyzeVolumeConfirmation(params.vol, params.history);
+
+  // EMA Alignment
+  let emaSignal: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
+  if (params.price > params.ema8 && params.ema8 > params.ema20) emaSignal = 'BUY';
+  if (params.price < params.ema8 && params.ema8 < params.ema20) emaSignal = 'SELL';
+
+  return {
+    pattern,
+    phase,
+    volSignal,
+    emaSignal,
+    isBullish: pattern === 'HAMMER' || pattern === 'BULLISH_ENGULFING',
+    isBearish: pattern === 'FALLING_STAR' || pattern === 'BEARISH_ENGULFING'
+  };
 }
